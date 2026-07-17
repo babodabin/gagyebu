@@ -426,15 +426,22 @@
 
   /* ---------- swiper ---------- */
   let pageIndex = 0;
+  function snapToPage(i){
+    $('swiper').style.transform = `translateX(-${i * 100}%)`;
+    document.querySelectorAll('.dot').forEach((d,idx)=> d.classList.toggle('active', idx===i));
+    $('addExpenseBtn').style.display = i === 2 ? 'none' : 'block';
+    $('calendarBtn').classList.toggle('active', i===1);
+    $('settingsBtn').classList.toggle('active', i===2);
+  }
   function goToPage(i){
-    pageIndex = Math.max(0, Math.min(2, i));
-    $('swiper').style.transform = `translateX(-${pageIndex * 100}%)`;
-    document.querySelectorAll('.dot').forEach((d,idx)=> d.classList.toggle('active', idx===pageIndex));
-    $('addExpenseBtn').style.display = pageIndex === 2 ? 'none' : 'block';
-    $('calendarBtn').classList.toggle('active', pageIndex===1);
-    $('settingsBtn').classList.toggle('active', pageIndex===2);
-    if(pageIndex===1) renderLedger();
-    if(pageIndex===2) renderSettings();
+    const next = Math.max(0, Math.min(2, i));
+    const changed = next !== pageIndex;
+    pageIndex = next;
+    snapToPage(pageIndex);
+    if(changed){
+      if(pageIndex===1) renderLedger();
+      if(pageIndex===2) renderSettings();
+    }
   }
   $('calendarBtn').onclick = () => goToPage(1);
   $('settingsBtn').onclick = () => goToPage(2);
@@ -443,6 +450,10 @@
   const viewport = document.querySelector('.viewport');
   let touchStartX = null, touchDeltaX = 0;
   viewport.addEventListener('touchstart', e => {
+    if(e.target.closest('input, select, button, .chip, .del, .icon-btn')){
+      touchStartX = null;
+      return;
+    }
     touchStartX = e.touches[0].clientX;
     touchDeltaX = 0;
     $('swiper').style.transition = 'none';
@@ -454,11 +465,12 @@
     $('swiper').style.transform = `translateX(${base + touchDeltaX}px)`;
   }, {passive:true});
   viewport.addEventListener('touchend', () => {
+    if(touchStartX === null) return;
     $('swiper').style.transition = '';
     if(Math.abs(touchDeltaX) > 60){
       goToPage(pageIndex + (touchDeltaX < 0 ? 1 : -1));
     } else {
-      goToPage(pageIndex);
+      snapToPage(pageIndex);
     }
     touchStartX = null; touchDeltaX = 0;
   });
