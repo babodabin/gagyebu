@@ -384,11 +384,19 @@
     `).join('');
     $('fixedList').querySelectorAll('[data-del]').forEach(btn=>{
       btn.onclick = () => {
+        syncFixedFromDOM();
         const i = parseInt(btn.getAttribute('data-del'));
         currentFixedItems.splice(i,1);
         renderFixedList(currentFixedItems);
       };
     });
+  }
+  function syncFixedFromDOM(){
+    const rows = $('fixedList').querySelectorAll('.fixed-item');
+    currentFixedItems = Array.from(rows).map(r => ({
+      name: r.querySelector('[name=name]').value,
+      amt: parseInt(r.querySelector('[name=amt]').value) || 0
+    }));
   }
   function renderSettings(){
     const cfg = loadConfig();
@@ -397,6 +405,7 @@
     renderFixedList(currentFixedItems);
   }
   $('addFixedBtn').onclick = () => {
+    syncFixedFromDOM();
     currentFixedItems.push({name:'', amt:0});
     renderFixedList(currentFixedItems);
   };
