@@ -21,6 +21,7 @@
     --stamp-gold: #a8781f;
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  .hidden { display: none !important; }
   html, body {
     margin: 0; padding: 0; height: 100%;
     font-family: 'IBM Plex Sans KR', sans-serif;
@@ -230,16 +231,25 @@
 
       <!-- ===== PAGE 2: SETTINGS ===== -->
       <div class="page" id="page-settings">
-        <h2>예산 / 고정비 설정</h2>
-        <div class="desc">여기서 수정하면 메인 화면에 바로 반영돼요.</div>
-        <div class="field">
-          <label>월 예산</label>
-          <input type="number" id="setupBudget" placeholder="1000000">
+        <div style="display:flex;justify-content:space-between;align-items:center;">
+          <h2>예산 / 고정비 설정</h2>
+          <button class="chip" id="editToggleBtn" style="flex:none;">편집</button>
         </div>
-        <label style="display:block;font-size:11px;opacity:.75;margin-bottom:8px;">고정비</label>
-        <div id="fixedList"></div>
-        <button class="add-fixed-btn" id="addFixedBtn">+ 고정비 항목 추가</button>
-        <button class="btn btn-primary" id="saveSetupBtn">저장하기</button>
+        <div class="desc">편집 버튼을 누르면 수정할 수 있어요.</div>
+
+        <div id="settingsView"></div>
+
+        <div id="settingsEdit" class="hidden">
+          <div class="field">
+            <label>월 예산</label>
+            <input type="number" id="setupBudget" placeholder="1000000">
+          </div>
+          <label style="display:block;font-size:11px;opacity:.75;margin-bottom:8px;">고정비</label>
+          <div id="fixedList"></div>
+          <button class="add-fixed-btn" id="addFixedBtn">+ 고정비 항목 추가</button>
+          <button class="btn btn-primary" id="saveSetupBtn">저장하기</button>
+        </div>
+        <div style="text-align:center;font-size:10px;opacity:.5;margin-top:14px;font-family:'IBM Plex Mono',monospace;">v1.2</div>
       </div>
 
     </div>
@@ -354,7 +364,7 @@
         lastDate = e.date;
       }
       html += `
-        <div class="ledger-row">
+        <div class="ledger-row" data-edit="${e.id}">
           <span>${e.memo || e.cat}
             <div class="tags"><span class="tag">${e.cat}</span><span class="tag pay">${e.pay}</span></div>
           </span>
@@ -364,10 +374,18 @@
     });
     $('ledgerList').innerHTML = html;
     $('ledgerList').querySelectorAll('[data-del]').forEach(btn=>{
-      btn.onclick = () => {
+      btn.onclick = (ev) => {
+        ev.stopPropagation();
         const id = parseInt(btn.getAttribute('data-del'));
         saveExpenses(loadExpenses().filter(e => e.id !== id));
         renderLedger(); renderMain();
+      };
+    });
+    $('ledgerList').querySelectorAll('[data-edit]').forEach(row=>{
+      row.onclick = () => {
+        const id = parseInt(row.getAttribute('data-edit'));
+        const exp = loadExpenses().find(x => x.id === id);
+        if(exp) openExpenseModal(exp);
       };
     });
   }
@@ -398,7 +416,27 @@
       amt: parseInt(r.querySelector('[name=amt]').value) || 0
     }));
   }
-  function renderSettings(){
+  function renderSettingsView(){
+    const cfg = loadConfig();
+    const total = cfg.fixedItems.reduce((s,i)=>s+i.amt,0);
+    $('settingsView').innerHTML = `
+      <div class="card">
+        <div class="mini-row"><span><b>월 예산</b></span><span class="v">${fmt(cfg.budget)}</span></div>
+        ${cfg.fixedItems.map(i=>`<div class="mini-row"><span>${i.name}</span><span class="v">${fmt(i.amt)}</span></div>`).join('')}
+        <div class="mini-row"><span><b>고정비 합계</b></span><span class="v red">-${fmt(total)}</span></div>
+      </div>`;
+  }
+  let settingsEditing = false;
+  function setSettingsMode(editing){
+    settingsEditing = editing;
+    $('settingsView').classList.toggle('hidden', editing);
+    $('settingsEdit').classList.toggle('hidden', !editing);
+    $('editToggleBtn').textContent = editing ? '취소' : '편집';
+    $('editToggleBtn').classList.toggle('selected', editing);
+    if(editing) renderSettingsEdit(); else renderSettingsView();
+  }
+  $('editToggleBtn').onclick = () => setSettingsMode(!settingsEditing);
+  function renderSettingsEdit(){
     const cfg = loadConfig();
     currentFixedItems = JSON.parse(JSON.stringify(cfg.fixedItems));
     $('setupBudget').value = cfg.budget;
@@ -418,10 +456,7 @@
     const budget = parseInt($('setupBudget').value) || 0;
     saveConfig({ budget, fixedItems: items });
     renderMain(); renderLedger();
-    const btn = $('saveSetupBtn');
-    const old = btn.textContent;
-    btn.textContent = '저장됨 ✓';
-    setTimeout(()=>{ btn.textContent = old; }, 1200);
+    setSettingsMode(false);
   };
 
   /* ---------- swiper ---------- */
@@ -440,7 +475,7 @@
     snapToPage(pageIndex);
     if(changed){
       if(pageIndex===1) renderLedger();
-      if(pageIndex===2) renderSettings();
+      if(pageIndex===2) setSettingsMode(false);
     }
   }
   $('calendarBtn').onclick = () => goToPage(1);
@@ -448,45 +483,60 @@
   document.querySelectorAll('.dot').forEach(d => d.onclick = () => goToPage(parseInt(d.getAttribute('data-p'))));
 
   const viewport = document.querySelector('.viewport');
-  let touchStartX = null, touchDeltaX = 0;
+  let touchStartX = null, touchStartY = null, touchDeltaX = 0, lockedDir = null;
   viewport.addEventListener('touchstart', e => {
     if(e.target.closest('input, select, button, .chip, .del, .icon-btn')){
       touchStartX = null;
       return;
     }
     touchStartX = e.touches[0].clientX;
+    touchStartY = e.touches[0].clientY;
     touchDeltaX = 0;
-    $('swiper').style.transition = 'none';
+    lockedDir = null;
   }, {passive:true});
   viewport.addEventListener('touchmove', e => {
     if(touchStartX === null) return;
-    touchDeltaX = e.touches[0].clientX - touchStartX;
+    const dx = e.touches[0].clientX - touchStartX;
+    const dy = e.touches[0].clientY - touchStartY;
+    if(lockedDir === null){
+      if(Math.abs(dx) < 10 && Math.abs(dy) < 10) return; // 아직 방향 판단 전
+      lockedDir = Math.abs(dx) > Math.abs(dy) ? 'h' : 'v';
+      if(lockedDir === 'h') $('swiper').style.transition = 'none';
+    }
+    if(lockedDir !== 'h') return; // 세로 스크롤 중에는 가로 이동 안 함
+    touchDeltaX = dx;
     const base = -pageIndex * viewport.offsetWidth;
     $('swiper').style.transform = `translateX(${base + touchDeltaX}px)`;
   }, {passive:true});
   viewport.addEventListener('touchend', () => {
     if(touchStartX === null) return;
-    $('swiper').style.transition = '';
-    if(Math.abs(touchDeltaX) > 60){
-      goToPage(pageIndex + (touchDeltaX < 0 ? 1 : -1));
-    } else {
-      snapToPage(pageIndex);
+    if(lockedDir === 'h'){
+      $('swiper').style.transition = '';
+      if(Math.abs(touchDeltaX) > 60){
+        goToPage(pageIndex + (touchDeltaX < 0 ? 1 : -1));
+      } else {
+        snapToPage(pageIndex);
+      }
     }
-    touchStartX = null; touchDeltaX = 0;
+    touchStartX = null; touchStartY = null; touchDeltaX = 0; lockedDir = null;
   });
 
-  /* ---------- add expense modal ---------- */
-  $('addExpenseBtn').onclick = () => {
-    let selectedCat = CATS[0];
-    let selectedPay = PAYS[0];
+  /* ---------- add / edit expense modal ---------- */
+  function openExpenseModal(existing){
+    let selectedCat = existing ? existing.cat : CATS[0];
+    let selectedPay = existing ? existing.pay : PAYS[0];
     const backdrop = document.createElement('div');
     backdrop.className = 'modal-backdrop';
     backdrop.innerHTML = `
       <div class="modal-sheet">
-        <h3>지출 입력</h3>
+        <h3>${existing ? '지출 수정' : '지출 입력'}</h3>
+        <div class="field">
+          <label>날짜</label>
+          <input type="date" id="mDate" value="${existing ? existing.date : todayKey()}">
+        </div>
         <div class="field">
           <label>금액</label>
-          <input type="number" id="mAmt" placeholder="0" inputmode="numeric">
+          <input type="number" id="mAmt" placeholder="0" inputmode="numeric" value="${existing ? existing.amt : ''}">
         </div>
         <div class="field">
           <label>분류</label>
@@ -498,7 +548,7 @@
         </div>
         <div class="field">
           <label>메모 (선택)</label>
-          <input type="text" id="mMemo" placeholder="예: 편의점">
+          <input type="text" id="mMemo" placeholder="예: 편의점" value="${existing ? (existing.memo||'').replace(/"/g,'&quot;') : ''}">
         </div>
         <div class="modal-actions">
           <button class="btn btn-secondary" id="mCancel">취소</button>
@@ -506,7 +556,7 @@
         </div>
       </div>`;
     document.body.appendChild(backdrop);
-    $('mAmt').focus();
+    if(!existing) $('mAmt').focus();
 
     backdrop.querySelectorAll('#catChips .chip').forEach(ch => ch.onclick = () => {
       selectedCat = ch.getAttribute('data-c');
@@ -523,20 +573,28 @@
     $('mSave').onclick = () => {
       const amt = parseInt($('mAmt').value);
       if(!amt || amt <= 0) return;
+      const date = $('mDate').value || todayKey();
       const list = loadExpenses();
-      list.push({
-        id: Date.now(),
-        date: todayKey(),
-        amt: amt,
-        cat: selectedCat,
-        pay: selectedPay,
-        memo: $('mMemo').value.trim()
-      });
+      if(existing){
+        const idx = list.findIndex(x => x.id === existing.id);
+        if(idx > -1){
+          list[idx] = { ...list[idx], date, amt, cat: selectedCat, pay: selectedPay, memo: $('mMemo').value.trim() };
+        }
+      } else {
+        list.push({
+          id: Date.now(),
+          date, amt,
+          cat: selectedCat,
+          pay: selectedPay,
+          memo: $('mMemo').value.trim()
+        });
+      }
       saveExpenses(list);
       backdrop.remove();
       renderMain(); renderLedger();
     };
-  };
+  }
+  $('addExpenseBtn').onclick = () => openExpenseModal(null);
 
   /* ---------- init ---------- */
   renderMain();
