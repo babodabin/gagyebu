@@ -1,0 +1,425 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="가계부">
+<title>가계부</title>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500;600;700&family=IBM+Plex+Sans+KR:wght@400;500;600;700&display=swap');
+
+  :root {
+    --paper: #f2ede1;
+    --paper-line: #d8cfba;
+    --ink: #1e2a3c;
+    --ink-soft: #5c6478;
+    --stamp-red: #a7333f;
+    --stamp-teal: #2f6f62;
+    --stamp-gold: #a8781f;
+  }
+  * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
+  html, body {
+    margin: 0; padding: 0; height: 100%;
+    background: var(--paper);
+    font-family: 'IBM Plex Sans KR', sans-serif;
+    color: var(--ink);
+    overscroll-behavior: none;
+  }
+  #app {
+    max-width: 480px; margin: 0 auto; min-height: 100vh;
+    padding: calc(env(safe-area-inset-top) + 18px) 18px calc(env(safe-area-inset-bottom) + 24px);
+    position: relative;
+  }
+
+  /* ---------- top bar ---------- */
+  .topbar { display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px; }
+  .topbar .title { font-size: 13px; letter-spacing: 0.2em; color: var(--ink-soft); font-weight: 600; }
+  .topbar .title span { color: var(--stamp-red); }
+  .icon-btn {
+    width: 38px; height: 38px; border-radius: 50%;
+    background: #fff; border: 1px solid var(--paper-line);
+    display: flex; align-items: center; justify-content: center;
+    font-size: 17px; color: var(--ink);
+  }
+
+  /* ---------- main (daily allowance) view ---------- */
+  .today-label { font-size: 11px; color: var(--ink-soft); letter-spacing: 0.1em; margin-top: 30px; }
+  .today-amount {
+    font-family: 'IBM Plex Mono', monospace;
+    font-size: 44px; font-weight: 700; color: var(--stamp-teal);
+    margin: 6px 0 22px; word-break: keep-all;
+  }
+  .today-amount.negative { color: var(--stamp-red); }
+
+  .card {
+    background: #fff; border: 1px solid var(--paper-line); border-radius: 6px;
+    margin-bottom: 12px; overflow: hidden;
+  }
+  .mini-row {
+    display: flex; justify-content: space-between; align-items: center;
+    font-size: 13px; padding: 12px 14px;
+    border-bottom: 1px solid var(--paper-line);
+  }
+  .mini-row:last-child { border-bottom: none; }
+  .mini-row .v { font-family: 'IBM Plex Mono', monospace; font-weight: 600; }
+  .mini-row .v.red { color: var(--stamp-red); }
+  .mini-row .v.teal { color: var(--stamp-teal); }
+
+  .add-btn {
+    position: fixed; bottom: calc(env(safe-area-inset-bottom) + 22px);
+    left: 50%; transform: translateX(-50%);
+    max-width: 480px; width: calc(100% - 36px);
+    background: var(--ink); color: #fff; border: none;
+    border-radius: 26px; padding: 15px; font-size: 14px; font-weight: 600;
+  }
+
+  /* ---------- ledger (calendar) view ---------- */
+  .hidden { display: none !important; }
+  .summary-strip {
+    display: flex; justify-content: space-between;
+    background: #fff; border: 1px solid var(--paper-line); border-radius: 6px;
+    padding: 12px 14px; margin: 16px 0; font-size: 11px;
+  }
+  .summary-strip .v { font-family: 'IBM Plex Mono', monospace; font-weight: 700; font-size: 15px; display: block; margin-top: 2px; }
+  .ledger-date-group { margin-bottom: 4px; }
+  .ledger-date-head {
+    font-size: 10px; font-family: 'IBM Plex Mono', monospace; color: var(--ink-soft);
+    padding: 10px 2px 4px;
+  }
+  .ledger-row {
+    display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center;
+    padding: 11px 12px; background: #fff; border: 1px solid var(--paper-line);
+    border-radius: 4px; margin-bottom: 6px; font-size: 12.5px;
+  }
+  .ledger-row .tag {
+    font-size: 9px; color: var(--stamp-gold); border: 1px solid var(--stamp-gold);
+    border-radius: 10px; padding: 1px 6px; width: fit-content; margin-top: 3px;
+  }
+  .ledger-row .amt { font-family: 'IBM Plex Mono', monospace; font-weight: 600; color: var(--stamp-red); }
+  .ledger-row .del { color: var(--ink-soft); font-size: 16px; padding: 0 4px; }
+  .empty-note { text-align: center; color: var(--ink-soft); font-size: 12px; padding: 40px 0; }
+
+  /* ---------- modal ---------- */
+  .modal-backdrop {
+    position: fixed; inset: 0; background: rgba(30,42,60,0.4);
+    display: flex; align-items: flex-end; z-index: 50;
+  }
+  .modal-sheet {
+    background: var(--paper); width: 100%; max-width: 480px; margin: 0 auto;
+    border-radius: 16px 16px 0 0; padding: 20px 18px calc(env(safe-area-inset-bottom) + 20px);
+  }
+  .modal-sheet h3 { margin: 0 0 14px; font-size: 15px; }
+  .field { margin-bottom: 12px; }
+  .field label { display: block; font-size: 11px; color: var(--ink-soft); margin-bottom: 5px; }
+  .field input, .field select {
+    width: 100%; padding: 11px 12px; border: 1px solid var(--paper-line);
+    border-radius: 6px; font-size: 14px; background: #fff; font-family: inherit;
+  }
+  .field input[type=number] { font-family: 'IBM Plex Mono', monospace; }
+  .modal-actions { display: flex; gap: 8px; margin-top: 16px; }
+  .btn {
+    flex: 1; padding: 13px; border-radius: 8px; border: none; font-size: 14px; font-weight: 600;
+  }
+  .btn-primary { background: var(--ink); color: #fff; }
+  .btn-secondary { background: #fff; color: var(--ink); border: 1px solid var(--paper-line); }
+
+  /* ---------- setup view ---------- */
+  #setup { padding-top: 10px; }
+  #setup h2 { font-size: 18px; margin: 6px 0 2px; }
+  #setup .desc { font-size: 12px; color: var(--ink-soft); margin-bottom: 18px; }
+  .fixed-item {
+    display: grid; grid-template-columns: 1fr 100px 30px; gap: 8px; margin-bottom: 8px; align-items: center;
+  }
+  .fixed-item input { padding: 10px; border: 1px solid var(--paper-line); border-radius: 6px; font-size: 13px; }
+  .fixed-item input[name=amt] { font-family: 'IBM Plex Mono', monospace; text-align: right; }
+  .fixed-item .del { text-align: center; color: var(--ink-soft); }
+  .add-fixed-btn {
+    width: 100%; padding: 10px; border: 1px dashed var(--paper-line); border-radius: 6px;
+    background: transparent; color: var(--ink-soft); font-size: 12px; margin-bottom: 18px;
+  }
+</style>
+</head>
+<body>
+<div id="app">
+
+  <!-- ===== SETUP ===== -->
+  <div id="setup" class="hidden">
+    <div class="topbar"><div class="title">가 계 부 · <span>설정</span></div></div>
+    <h2>이번 달 예산 설정</h2>
+    <div class="desc">한 달 예산과 고정비를 입력하면, 남은 날짜에 맞춰 오늘 쓸 수 있는 돈을 자동으로 계산해요.</div>
+
+    <div class="field">
+      <label>월 예산</label>
+      <input type="number" id="setupBudget" placeholder="1000000">
+    </div>
+
+    <label style="display:block;font-size:11px;color:var(--ink-soft);margin-bottom:8px;">고정비</label>
+    <div id="fixedList"></div>
+    <button class="add-fixed-btn" id="addFixedBtn">+ 고정비 항목 추가</button>
+
+    <button class="btn btn-primary" style="width:100%;" id="saveSetupBtn">시작하기</button>
+  </div>
+
+  <!-- ===== MAIN ===== -->
+  <div id="main" class="hidden">
+    <div class="topbar">
+      <div class="title">가 계 부 <span id="monthLabel"></span></div>
+      <button class="icon-btn" id="calendarBtn" title="지출 내역">📅</button>
+    </div>
+
+    <div class="today-label">오늘 쓸 수 있는 돈</div>
+    <div class="today-amount" id="todayAmount">0원</div>
+
+    <div class="card">
+      <div class="mini-row"><span>어제 지출</span><span class="v" id="yesterdaySpent">0원</span></div>
+      <div class="mini-row"><span>남은 일수</span><span class="v" id="daysLeft">0일</span></div>
+      <div class="mini-row"><span>고정비 차감 후 잔액</span><span class="v" id="afterFixed">0원</span></div>
+      <div class="mini-row"><span>현재 잔액</span><span class="v teal" id="currentBalance">0원</span></div>
+    </div>
+
+    <button class="btn btn-secondary" style="width:100%;" id="editSetupBtn">예산 / 고정비 수정</button>
+  </div>
+
+  <!-- ===== LEDGER ===== -->
+  <div id="ledger" class="hidden">
+    <div class="topbar">
+      <button class="icon-btn" id="backBtn">←</button>
+      <div class="title">지 출 <span>내역</span></div>
+      <div style="width:38px;"></div>
+    </div>
+    <div class="summary-strip">
+      <div>고정비 차감 후<span class="v" id="ledgerAfterFixed">0원</span></div>
+      <div>현재 잔액<span class="v" id="ledgerBalance">0원</span></div>
+    </div>
+    <div id="ledgerList"></div>
+  </div>
+
+  <button class="add-btn hidden" id="addExpenseBtn">+ 지출 입력</button>
+</div>
+
+<script>
+(function(){
+  const $ = id => document.getElementById(id);
+  const CATS = ['식비','교통','생활','미용','기타'];
+  const monthKey = () => new Date().toISOString().slice(0,7); // YYYY-MM
+  const todayKey = () => new Date().toISOString().slice(0,10); // YYYY-MM-DD
+
+  function loadConfig(){
+    const raw = localStorage.getItem('gb_config_' + monthKey());
+    return raw ? JSON.parse(raw) : null;
+  }
+  function saveConfig(cfg){
+    localStorage.setItem('gb_config_' + monthKey(), JSON.stringify(cfg));
+  }
+  function loadExpenses(){
+    const raw = localStorage.getItem('gb_expenses_' + monthKey());
+    return raw ? JSON.parse(raw) : [];
+  }
+  function saveExpenses(list){
+    localStorage.setItem('gb_expenses_' + monthKey(), JSON.stringify(list));
+  }
+  function fmt(n){ return Math.round(n).toLocaleString('ko-KR') + '원'; }
+
+  function daysInMonth(){
+    const d = new Date();
+    return new Date(d.getFullYear(), d.getMonth()+1, 0).getDate();
+  }
+  function daysRemainingIncludingToday(){
+    const d = new Date();
+    return daysInMonth() - d.getDate() + 1;
+  }
+
+  /* ---------- setup screen ---------- */
+  const defaultFixedItems = [
+    {name:'월세', amt:150000},
+    {name:'수도세', amt:50000},
+    {name:'유튜브', amt:30000},
+    {name:'넷플릭스', amt:30000},
+    {name:'통신비(SKT)', amt:100000},
+    {name:'가스비', amt:50000},
+    {name:'전기세', amt:30000},
+    {name:'교통', amt:100000},
+    {name:'미용비', amt:50000},
+  ];
+
+  function renderFixedList(items){
+    $('fixedList').innerHTML = items.map((it, i) => `
+      <div class="fixed-item" data-i="${i}">
+        <input name="name" value="${it.name}" placeholder="항목명">
+        <input name="amt" type="number" value="${it.amt}" placeholder="금액">
+        <div class="del" data-del="${i}">✕</div>
+      </div>
+    `).join('');
+    $('fixedList').querySelectorAll('[data-del]').forEach(btn=>{
+      btn.onclick = () => {
+        const i = parseInt(btn.getAttribute('data-del'));
+        currentFixedItems.splice(i,1);
+        renderFixedList(currentFixedItems);
+      };
+    });
+  }
+
+  let currentFixedItems = [];
+
+  function showSetup(existing){
+    currentFixedItems = existing ? JSON.parse(JSON.stringify(existing.fixedItems)) : JSON.parse(JSON.stringify(defaultFixedItems));
+    $('setupBudget').value = existing ? existing.budget : 1000000;
+    renderFixedList(currentFixedItems);
+    show('setup');
+  }
+
+  $('addFixedBtn').onclick = () => {
+    currentFixedItems.push({name:'', amt:0});
+    renderFixedList(currentFixedItems);
+  };
+
+  $('saveSetupBtn').onclick = () => {
+    // collect current input values
+    const rows = $('fixedList').querySelectorAll('.fixed-item');
+    const items = Array.from(rows).map(r => ({
+      name: r.querySelector('[name=name]').value.trim() || '항목',
+      amt: parseInt(r.querySelector('[name=amt]').value) || 0
+    }));
+    const budget = parseInt($('setupBudget').value) || 0;
+    saveConfig({ budget, fixedItems: items });
+    renderMain();
+  };
+
+  /* ---------- main screen ---------- */
+  function renderMain(){
+    const cfg = loadConfig();
+    if(!cfg){ showSetup(null); return; }
+
+    const expenses = loadExpenses();
+    const fixedTotal = cfg.fixedItems.reduce((s,i)=>s+i.amt,0);
+    const spentTotal = expenses.reduce((s,e)=>s+e.amt,0);
+    const balance = cfg.budget - fixedTotal - spentTotal;
+    const afterFixed = cfg.budget - fixedTotal;
+
+    const yestKey = new Date(Date.now() - 86400000).toISOString().slice(0,10);
+    const yestSpent = expenses.filter(e=>e.date===yestKey).reduce((s,e)=>s+e.amt,0);
+
+    const daysLeft = daysRemainingIncludingToday();
+    const dailyAllowance = balance / Math.max(daysLeft,1);
+
+    $('monthLabel').textContent = '· ' + new Date().getMonth()+1 + '월';
+    const amtEl = $('todayAmount');
+    amtEl.textContent = fmt(dailyAllowance);
+    amtEl.classList.toggle('negative', dailyAllowance < 0);
+    $('yesterdaySpent').textContent = '-' + fmt(yestSpent);
+    $('daysLeft').textContent = daysLeft + '일';
+    $('afterFixed').textContent = fmt(afterFixed);
+    $('currentBalance').textContent = fmt(balance);
+
+    show('main');
+  }
+
+  $('editSetupBtn').onclick = () => showSetup(loadConfig());
+
+  /* ---------- ledger screen ---------- */
+  function renderLedger(){
+    const cfg = loadConfig();
+    const expenses = loadExpenses().slice().sort((a,b)=> b.date.localeCompare(a.date) || b.id - a.id);
+    const fixedTotal = cfg.fixedItems.reduce((s,i)=>s+i.amt,0);
+    const spentTotal = expenses.reduce((s,e)=>s+e.amt,0);
+    $('ledgerAfterFixed').textContent = fmt(cfg.budget - fixedTotal);
+    $('ledgerBalance').textContent = fmt(cfg.budget - fixedTotal - spentTotal);
+
+    if(expenses.length === 0){
+      $('ledgerList').innerHTML = '<div class="empty-note">아직 지출 기록이 없어요</div>';
+      show('ledger');
+      return;
+    }
+
+    let html = '';
+    let lastDate = null;
+    expenses.forEach(e => {
+      if(e.date !== lastDate){
+        html += `<div class="ledger-date-head">${e.date.slice(5).replace('-','.')}</div>`;
+        lastDate = e.date;
+      }
+      html += `
+        <div class="ledger-row">
+          <span>${e.memo || e.cat}<div class="tag">${e.cat}</div></span>
+          <span class="amt">-${e.amt.toLocaleString('ko-KR')}</span>
+          <span class="del" data-del="${e.id}">✕</span>
+        </div>`;
+    });
+    $('ledgerList').innerHTML = html;
+    $('ledgerList').querySelectorAll('[data-del]').forEach(btn=>{
+      btn.onclick = () => {
+        const id = parseInt(btn.getAttribute('data-del'));
+        const list = loadExpenses().filter(e => e.id !== id);
+        saveExpenses(list);
+        renderLedger();
+      };
+    });
+    show('ledger');
+  }
+
+  $('calendarBtn').onclick = renderLedger;
+  $('backBtn').onclick = renderMain;
+
+  /* ---------- add expense modal ---------- */
+  $('addExpenseBtn').onclick = () => {
+    const backdrop = document.createElement('div');
+    backdrop.className = 'modal-backdrop';
+    backdrop.innerHTML = `
+      <div class="modal-sheet">
+        <h3>지출 입력</h3>
+        <div class="field">
+          <label>금액</label>
+          <input type="number" id="mAmt" placeholder="0" inputmode="numeric">
+        </div>
+        <div class="field">
+          <label>분류</label>
+          <select id="mCat">${CATS.map(c=>`<option>${c}</option>`).join('')}</select>
+        </div>
+        <div class="field">
+          <label>메모 (선택)</label>
+          <input type="text" id="mMemo" placeholder="예: 편의점">
+        </div>
+        <div class="modal-actions">
+          <button class="btn btn-secondary" id="mCancel">취소</button>
+          <button class="btn btn-primary" id="mSave">저장</button>
+        </div>
+      </div>`;
+    document.body.appendChild(backdrop);
+    $('mAmt').focus();
+
+    $('mCancel').onclick = () => backdrop.remove();
+    backdrop.addEventListener('click', e => { if(e.target === backdrop) backdrop.remove(); });
+
+    $('mSave').onclick = () => {
+      const amt = parseInt($('mAmt').value);
+      if(!amt || amt <= 0) return;
+      const list = loadExpenses();
+      list.push({
+        id: Date.now(),
+        date: todayKey(),
+        amt: amt,
+        cat: $('mCat').value,
+        memo: $('mMemo').value.trim()
+      });
+      saveExpenses(list);
+      backdrop.remove();
+      renderMain();
+    };
+  };
+
+  /* ---------- view switcher ---------- */
+  function show(view){
+    ['setup','main','ledger'].forEach(v => $(v).classList.toggle('hidden', v !== view));
+    $('addExpenseBtn').classList.toggle('hidden', view !== 'main');
+  }
+
+  /* ---------- init ---------- */
+  const cfg = loadConfig();
+  if(cfg) renderMain(); else showSetup(null);
+
+})();
+</script>
+</body>
+</html>
