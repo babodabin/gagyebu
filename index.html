@@ -22,8 +22,10 @@
   }
   * { box-sizing: border-box; -webkit-tap-highlight-color: transparent; }
   .hidden { display: none !important; }
-  html, body {
-    margin: 0; padding: 0; height: 100%;
+  html { height: 100%; }
+  body {
+    margin: 0; padding: 0;
+    position: fixed; inset: 0; overflow: hidden;
     font-family: 'IBM Plex Sans KR', sans-serif;
     overscroll-behavior: none;
   }
@@ -47,9 +49,10 @@
   }
 
   #app {
-    max-width: 480px; margin: 0 auto; min-height: 100vh;
-    padding: calc(env(safe-area-inset-top) + 16px) 0 calc(env(safe-area-inset-bottom) + 24px);
+    max-width: 480px; margin: 0 auto; height: 100%;
+    padding: calc(env(safe-area-inset-top) + 16px) 0 0;
     position: relative;
+    display: flex; flex-direction: column;
   }
 
   /* ---------- global topbar ---------- */
@@ -70,9 +73,14 @@
   .dot.active { opacity: 0.9; }
 
   /* ---------- swiper ---------- */
-  .viewport { overflow: hidden; width: 100%; }
-  .swiper { display: flex; transition: transform 0.3s cubic-bezier(.2,.7,.3,1); }
-  .page { flex: 0 0 100%; width: 100%; padding: 8px 18px 100px; min-height: 60vh; }
+  .viewport { overflow: hidden; width: 100%; flex: 1 1 auto; min-height: 0; }
+  .swiper { display: flex; height: 100%; transition: transform 0.3s cubic-bezier(.2,.7,.3,1); }
+  .page {
+    flex: 0 0 100%; width: 100%; height: 100%;
+    padding: 8px 18px calc(env(safe-area-inset-bottom) + 110px);
+    overflow-y: auto; -webkit-overflow-scrolling: touch;
+    overscroll-behavior-y: contain;
+  }
 
   /* ---------- main page ---------- */
   .today-label { font-size: 11px; opacity: 0.75; letter-spacing: 0.1em; margin-top: 22px; }
@@ -119,7 +127,7 @@
     padding: 10px 2px 4px;
   }
   .ledger-row {
-    display: grid; grid-template-columns: 1fr auto auto; gap: 10px; align-items: center;
+    display: grid; grid-template-columns: 1fr auto; gap: 10px; align-items: center;
     padding: 11px 12px; background: #fff; border: 1px solid var(--paper-line);
     border-radius: 4px; margin-bottom: 6px; font-size: 12.5px; color: var(--ink);
   }
@@ -218,6 +226,8 @@
           <div class="mini-row"><span>고정비 차감 후 잔액</span><span class="v" id="afterFixed">0원</span></div>
           <div class="mini-row"><span>현재 잔액</span><span class="v teal" id="currentBalance">0원</span></div>
         </div>
+        <div class="today-label" style="margin-top:14px;margin-bottom:6px;">고정비</div>
+        <div class="card" id="fixedSummary"></div>
       </div>
 
       <!-- ===== PAGE 1: LEDGER ===== -->
@@ -249,7 +259,7 @@
           <button class="add-fixed-btn" id="addFixedBtn">+ 고정비 항목 추가</button>
           <button class="btn btn-primary" id="saveSetupBtn">저장하기</button>
         </div>
-        <div style="text-align:center;font-size:10px;opacity:.5;margin-top:14px;font-family:'IBM Plex Mono',monospace;">v1.2</div>
+        <div style="text-align:center;font-size:10px;opacity:.5;margin-top:14px;font-family:'IBM Plex Mono',monospace;">v1.3</div>
       </div>
 
     </div>
@@ -340,6 +350,10 @@
     $('afterFixed').textContent = fmt(afterFixed);
     $('currentBalance').textContent = fmt(balance);
 
+    $('fixedSummary').innerHTML =
+      cfg.fixedItems.map(i=>`<div class="mini-row"><span>${i.name}</span><span class="v">${fmt(i.amt)}</span></div>`).join('') +
+      `<div class="mini-row"><span><b>합계</b></span><span class="v red">-${fmt(fixedTotal)}</span></div>`;
+
     applyTheme(balance);
   }
 
@@ -369,18 +383,9 @@
             <div class="tags"><span class="tag">${e.cat}</span><span class="tag pay">${e.pay}</span></div>
           </span>
           <span class="amt">-${e.amt.toLocaleString('ko-KR')}</span>
-          <span class="del" data-del="${e.id}">✕</span>
         </div>`;
     });
     $('ledgerList').innerHTML = html;
-    $('ledgerList').querySelectorAll('[data-del]').forEach(btn=>{
-      btn.onclick = (ev) => {
-        ev.stopPropagation();
-        const id = parseInt(btn.getAttribute('data-del'));
-        saveExpenses(loadExpenses().filter(e => e.id !== id));
-        renderLedger(); renderMain();
-      };
-    });
     $('ledgerList').querySelectorAll('[data-edit]').forEach(row=>{
       row.onclick = () => {
         const id = parseInt(row.getAttribute('data-edit'));
@@ -551,12 +556,27 @@
           <input type="text" id="mMemo" placeholder="예: 편의점" value="${existing ? (existing.memo||'').replace(/"/g,'&quot;') : ''}">
         </div>
         <div class="modal-actions">
+          ${existing ? '<button class="btn btn-secondary" id="mDelete" style="flex:0 0 auto;color:var(--stamp-red);border-color:var(--stamp-red);">삭제</button>' : ''}
           <button class="btn btn-secondary" id="mCancel">취소</button>
           <button class="btn btn-primary" id="mSave">저장</button>
         </div>
       </div>`;
     document.body.appendChild(backdrop);
     if(!existing) $('mAmt').focus();
+
+    if(existing){
+      let armed = false;
+      $('mDelete').onclick = () => {
+        if(!armed){
+          armed = true;
+          $('mDelete').textContent = '정말 삭제?';
+          return;
+        }
+        saveExpenses(loadExpenses().filter(x => x.id !== existing.id));
+        backdrop.remove();
+        renderMain(); renderLedger();
+      };
+    }
 
     backdrop.querySelectorAll('#catChips .chip').forEach(ch => ch.onclick = () => {
       selectedCat = ch.getAttribute('data-c');
