@@ -87,7 +87,11 @@
   .today-amount {
     font-family: 'IBM Plex Mono', monospace;
     font-size: 44px; font-weight: 700;
-    margin: 6px 0 20px; word-break: keep-all;
+    margin: 6px 0 6px; word-break: keep-all;
+  }
+  .avg-line {
+    font-size: 12px; opacity: 0.7; margin-bottom: 18px;
+    font-family: 'IBM Plex Mono', monospace;
   }
   .card {
     background: #fff; border: 1px solid var(--paper-line); border-radius: 6px;
@@ -121,6 +125,17 @@
     background: #fff; border: 1px solid var(--paper-line); border-radius: 6px;
     padding: 12px 14px; margin: 14px 0; font-size: 11px; color: var(--ink);
   }
+  .month-nav {
+    display: flex; align-items: center; gap: 10px; margin-top: 12px;
+  }
+  .month-nav #viewMonthLabel { font-weight: 700; font-size: 15px; min-width: 70px; text-align: center; }
+  .nav-arrow {
+    width: 40px; height: 40px; border-radius: 50%;
+    background: #fff; border: 1px solid var(--paper-line);
+    font-size: 20px; color: var(--ink); line-height: 1;
+  }
+  .nav-arrow:disabled { opacity: 0.3; }
+  .past-note { font-size: 10.5px; opacity: 0.65; margin: -6px 0 10px; }
   .summary-strip .v { font-family: 'IBM Plex Mono', monospace; font-weight: 700; font-size: 15px; display: block; margin-top: 2px; }
   .ledger-date-head {
     font-size: 10px; font-family: 'IBM Plex Mono', monospace; opacity: 0.6;
@@ -162,6 +177,8 @@
     background: transparent; color: var(--ink-soft); font-size: 12px; margin-bottom: 18px;
   }
   .btn { padding: 13px; border-radius: 8px; border: none; font-size: 14px; font-weight: 600; width: 100%; }
+  .modal-actions .btn { width: auto; flex: 1 1 0; min-width: 0; }
+  .modal-actions #mDelete { flex: 0 0 auto; padding-left: 16px; padding-right: 16px; }
   .btn-primary { background: var(--ink); color: #fff; }
 
   /* ---------- modal ---------- */
@@ -220,17 +237,24 @@
       <div class="page" id="page-main">
         <div class="today-label">오늘 쓸 수 있는 돈</div>
         <div class="today-amount" id="todayAmount">0원</div>
+        <div class="avg-line" id="avgLine"></div>
         <div class="card">
           <div class="mini-row"><span>고정비 지출</span><span class="v red" id="fixedTotalRow">0원</span></div>
+          <div class="mini-row"><span>고정비 차감 후 잔액</span><span class="v" id="afterFixed">0원</span></div>
           <div class="mini-row"><span>어제 지출</span><span class="v" id="yesterdaySpent">0원</span></div>
           <div class="mini-row"><span>남은 일수</span><span class="v" id="daysLeft">0일</span></div>
-          <div class="mini-row"><span>고정비 차감 후 잔액</span><span class="v" id="afterFixed">0원</span></div>
           <div class="mini-row"><span>현재 잔액</span><span class="v teal" id="currentBalance">0원</span></div>
         </div>
       </div>
 
       <!-- ===== PAGE 1: LEDGER ===== -->
       <div class="page" id="page-ledger">
+        <div class="month-nav">
+          <button class="nav-arrow" id="prevMonthBtn">‹</button>
+          <div id="viewMonthLabel"></div>
+          <button class="nav-arrow" id="nextMonthBtn">›</button>
+          <button class="chip" id="todayBtn" style="margin-left:auto;">오늘</button>
+        </div>
         <div class="summary-strip">
           <div>고정비 차감 후<span class="v" id="ledgerAfterFixed">0원</span></div>
           <div>현재 잔액<span class="v" id="ledgerBalance">0원</span></div>
@@ -258,7 +282,7 @@
           <button class="add-fixed-btn" id="addFixedBtn">+ 고정비 항목 추가</button>
           <button class="btn btn-primary" id="saveSetupBtn">저장하기</button>
         </div>
-        <div style="text-align:center;font-size:10px;opacity:.5;margin-top:14px;font-family:'IBM Plex Mono',monospace;">v1.4</div>
+        <div style="text-align:center;font-size:10px;opacity:.5;margin-top:14px;font-family:'IBM Plex Mono',monospace;">v1.9</div>
       </div>
 
     </div>
@@ -296,7 +320,16 @@
   function loadConfig(){
     const raw = localStorage.getItem('gb_config_' + monthKey());
     if(raw) return JSON.parse(raw);
-    const def = { budget: 1000000, fixedItems: JSON.parse(JSON.stringify(defaultFixedItems)) };
+    // 이번 달 설정이 없으면 가장 최근 달의 설정을 이어받음
+    const prevKeys = Object.keys(localStorage)
+      .filter(k => k.startsWith('gb_config_'))
+      .sort();
+    let def;
+    if(prevKeys.length > 0){
+      def = JSON.parse(localStorage.getItem(prevKeys[prevKeys.length - 1]));
+    } else {
+      def = { budget: 1000000, fixedItems: JSON.parse(JSON.stringify(defaultFixedItems)) };
+    }
     localStorage.setItem('gb_config_' + monthKey(), JSON.stringify(def));
     return def;
   }
@@ -356,23 +389,53 @@
     $('currentBalance').textContent = fmt(balance);
     $('fixedTotalRow').textContent = '-' + fmt(fixedTotal);
 
+    const prevM = shiftMonth(monthKey(), -1);
+    const prevRaw = localStorage.getItem('gb_expenses_' + prevM);
+    if(prevRaw && JSON.parse(prevRaw).length > 0){
+      const prevSpent = JSON.parse(prevRaw).reduce((s,e)=>s+e.amt,0);
+      const [py, pm] = prevM.split('-').map(Number);
+      const prevDays = new Date(py, pm, 0).getDate();
+      $('avgLine').textContent = '지난달 하루 평균 ' + fmt(prevSpent / prevDays);
+    } else {
+      const elapsedDays = new Date().getDate();
+      $('avgLine').textContent = '이번 달 하루 평균 ' + fmt(spentTotal / elapsedDays);
+    }
+
     applyTheme(balance);
   }
 
   /* ---------- render: ledger ---------- */
+  let viewMonth = monthKey();
+  function shiftMonth(m, delta){
+    let [y, mm] = m.split('-').map(Number);
+    mm += delta;
+    while(mm < 1){ mm += 12; y--; }
+    while(mm > 12){ mm -= 12; y++; }
+    return `${y}-${String(mm).padStart(2,'0')}`;
+  }
   function renderLedger(){
-    const cfg = loadConfig();
-    const expenses = loadExpenses().slice().sort((a,b)=> b.date.localeCompare(a.date) || b.id - a.id);
+    const isCurrent = viewMonth === monthKey();
+    const cfgRaw = localStorage.getItem('gb_config_' + viewMonth);
+    const cfg = cfgRaw ? JSON.parse(cfgRaw) : loadConfig();
+    const expRaw = localStorage.getItem('gb_expenses_' + viewMonth);
+    const expenses = (expRaw ? JSON.parse(expRaw) : []).slice().sort((a,b)=> b.date.localeCompare(a.date) || b.id - a.id);
+
+    const [vy, vm] = viewMonth.split('-').map(Number);
+    const thisYear = new Date().getFullYear();
+    $('viewMonthLabel').textContent = (vy !== thisYear ? vy + '년 ' : '') + vm + '월';
+    $('nextMonthBtn').disabled = isCurrent;
+    $('todayBtn').style.visibility = isCurrent ? 'hidden' : 'visible';
+
     const fixedTotal = cfg.fixedItems.reduce((s,i)=>s+i.amt,0);
     const spentTotal = expenses.reduce((s,e)=>s+e.amt,0);
     $('ledgerAfterFixed').textContent = fmt(cfg.budget - fixedTotal);
     $('ledgerBalance').textContent = fmt(cfg.budget - fixedTotal - spentTotal);
 
     if(expenses.length === 0){
-      $('ledgerList').innerHTML = '<div class="empty-note">아직 지출 기록이 없어요</div>';
+      $('ledgerList').innerHTML = '<div class="empty-note">지출 기록이 없어요</div>';
       return;
     }
-    let html = '';
+    let html = isCurrent ? '' : '<div class="past-note">지난달 내역은 열람만 가능해요</div>';
     let lastDate = null;
     expenses.forEach(e => {
       if(e.date !== lastDate){
@@ -380,7 +443,7 @@
         lastDate = e.date;
       }
       html += `
-        <div class="ledger-row" data-edit="${e.id}">
+        <div class="ledger-row"${isCurrent ? ` data-edit="${e.id}"` : ' style="opacity:.75;"'}>
           <span>${e.memo || e.cat}
             <div class="tags"><span class="tag">${e.cat}</span><span class="tag pay">${e.pay}</span></div>
           </span>
@@ -388,14 +451,23 @@
         </div>`;
     });
     $('ledgerList').innerHTML = html;
-    $('ledgerList').querySelectorAll('[data-edit]').forEach(row=>{
-      row.onclick = () => {
-        const id = parseInt(row.getAttribute('data-edit'));
-        const exp = loadExpenses().find(x => x.id === id);
-        if(exp) openExpenseModal(exp);
-      };
-    });
+    if(isCurrent){
+      $('ledgerList').querySelectorAll('[data-edit]').forEach(row=>{
+        row.onclick = () => {
+          const id = parseInt(row.getAttribute('data-edit'));
+          const exp = loadExpenses().find(x => x.id === id);
+          if(exp) openExpenseModal(exp);
+        };
+      });
+    }
   }
+  $('prevMonthBtn').onclick = () => { viewMonth = shiftMonth(viewMonth, -1); renderLedger(); };
+  $('nextMonthBtn').onclick = () => {
+    if(viewMonth === monthKey()) return;
+    viewMonth = shiftMonth(viewMonth, 1);
+    renderLedger();
+  };
+  $('todayBtn').onclick = () => { viewMonth = monthKey(); renderLedger(); };
 
   /* ---------- render: settings ---------- */
   let currentFixedItems = [];
@@ -481,7 +553,7 @@
     pageIndex = next;
     snapToPage(pageIndex);
     if(changed){
-      if(pageIndex===1) renderLedger();
+      if(pageIndex===1){ viewMonth = monthKey(); renderLedger(); }
       if(pageIndex===2) setSettingsMode(false);
     }
   }
@@ -558,7 +630,7 @@
           <input type="text" id="mMemo" placeholder="예: 편의점" value="${existing ? (existing.memo||'').replace(/"/g,'&quot;') : ''}">
         </div>
         <div class="modal-actions">
-          ${existing ? '<button class="btn btn-secondary" id="mDelete" style="flex:0 0 auto;color:var(--stamp-red);border-color:var(--stamp-red);">삭제</button>' : ''}
+          ${existing ? '<button class="btn btn-secondary" id="mDelete" style="color:var(--stamp-red);border-color:var(--stamp-red);">삭제</button>' : ''}
           <button class="btn btn-secondary" id="mCancel">취소</button>
           <button class="btn btn-primary" id="mSave">저장</button>
         </div>
