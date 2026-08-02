@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-status-bar-style" content="black">
 <meta name="apple-mobile-web-app-title" content="가계부">
 <link rel="apple-touch-icon" href="icon-180.png">
 <title>가계부</title>
@@ -50,7 +50,7 @@
 
   #app {
     max-width: 480px; margin: 0 auto; height: 100%;
-    padding: calc(env(safe-area-inset-top) + 16px) 0 0;
+    padding: calc(env(safe-area-inset-top) + 24px) 0 0;
     position: relative;
     display: flex; flex-direction: column;
   }
@@ -81,6 +81,8 @@
     overflow-y: auto; -webkit-overflow-scrolling: touch;
     overscroll-behavior-y: contain;
   }
+
+  #page-settings { padding-bottom: calc(env(safe-area-inset-bottom) + 24px); }
 
   /* ---------- main page ---------- */
   .today-label { font-size: 11px; opacity: 0.75; letter-spacing: 0.1em; margin-top: 22px; }
@@ -284,7 +286,7 @@
           <button class="add-fixed-btn" id="addFixedBtn">+ 고정비 항목 추가</button>
           <button class="btn btn-primary" id="saveSetupBtn">저장하기</button>
         </div>
-        <div style="text-align:center;font-size:10px;opacity:.5;margin-top:14px;font-family:'IBM Plex Mono',monospace;">v2.1</div>
+        <div style="text-align:center;font-size:10px;opacity:.5;margin-top:14px;font-family:'IBM Plex Mono',monospace;">v2.2</div>
       </div>
 
     </div>
@@ -579,7 +581,7 @@
   function snapToPage(i){
     $('swiper').style.transform = `translateX(-${i * 100}%)`;
     document.querySelectorAll('.dot').forEach((d,idx)=> d.classList.toggle('active', idx===i));
-    $('addExpenseBtn').style.display = i === 2 ? 'none' : 'block';
+    $('addExpenseBtn').style.display = i === 2 ? 'none' : 'flex';
     $('calendarBtn').classList.toggle('active', i===1);
     $('settingsBtn').classList.toggle('active', i===2);
   }
