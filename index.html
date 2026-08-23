@@ -177,13 +177,33 @@
     background: transparent; color: var(--ink-soft); font-size: 12px; margin-bottom: 18px;
   }
   .category-item {
-    display: grid; grid-template-columns: 1fr 30px; gap: 8px; margin-bottom: 8px; align-items: center;
+    display: grid; grid-template-columns: minmax(0,1fr) 104px 72px 30px; gap: 8px; margin-bottom: 8px; align-items: center;
   }
   .category-item input {
-    padding: 10px; border: 1px solid var(--paper-line); border-radius: 6px; font-size: 13px; background:#fff; color: var(--ink);
+    min-width: 0; padding: 10px; border: 1px solid var(--paper-line); border-radius: 6px; font-size: 13px; background:#fff; color: var(--ink);
   }
+  .category-item input[name=catBudget] { text-align:right; font-family:'IBM Plex Mono', monospace; }
   .category-item .del { text-align: center; opacity: 0.6; }
+  .cat-order-wrap { display:grid; grid-template-columns:1fr 1fr; gap:4px; }
+  .cat-order-btn {
+    height:38px; border-radius:6px; border:1px solid var(--paper-line); background:#fff; color:var(--ink);
+    font-size:16px; line-height:1; padding:0;
+  }
+  .cat-order-btn:disabled { opacity:.28; }
   .settings-section-label { display:block; font-size:11px; opacity:.75; margin: 4px 0 8px; }
+  .settings-overview-grid { display:grid; grid-template-columns:1fr 1fr; gap:8px; margin-bottom:12px; }
+  .overview-box { background:#fff; border:1px solid var(--paper-line); border-radius:6px; padding:12px; color:var(--ink); }
+  .overview-box .k { font-size:10px; opacity:.65; margin-bottom:4px; }
+  .overview-box .v { font-family:'IBM Plex Mono', monospace; font-size:16px; font-weight:700; }
+  .variable-stat { padding:12px 14px; border-bottom:1px solid var(--paper-line); }
+  .variable-stat:last-child { border-bottom:none; }
+  .variable-stat-head { display:flex; justify-content:space-between; gap:10px; align-items:baseline; margin-bottom:8px; }
+  .variable-stat-head b { font-size:13px; }
+  .variable-stat-head .budget { font-family:'IBM Plex Mono', monospace; font-size:11px; color:var(--stamp-teal); }
+  .stat-grid { display:grid; grid-template-columns:repeat(3,1fr); gap:6px; }
+  .stat-cell { background:rgba(242,237,225,.55); border-radius:5px; padding:7px 6px; min-width:0; }
+  .stat-cell .k { display:block; font-size:9px; opacity:.62; margin-bottom:3px; white-space:nowrap; }
+  .stat-cell .v { display:block; font-family:'IBM Plex Mono', monospace; font-size:10.5px; font-weight:600; overflow:hidden; text-overflow:ellipsis; }
   .btn { padding: 13px; border-radius: 8px; border: none; font-size: 14px; font-weight: 600; width: 100%; }
   .modal-actions .btn { width: auto; flex: 1 1 0; min-width: 0; }
   .modal-actions #mDelete { flex: 0 0 auto; padding-left: 16px; padding-right: 16px; }
@@ -273,7 +293,7 @@
       <!-- ===== PAGE 2: SETTINGS ===== -->
       <div class="page" id="page-settings">
         <div style="display:flex;justify-content:space-between;align-items:center;">
-          <h2>예산 / 고정비 설정</h2>
+          <h2>예산 / 지출 설정</h2>
           <button class="chip" id="editToggleBtn" style="flex:none;">편집</button>
         </div>
         <div class="desc">편집 버튼을 누르면 수정할 수 있어요.</div>
@@ -289,13 +309,13 @@
           <div id="fixedList"></div>
           <button class="add-fixed-btn" id="addFixedBtn">+ 고정비 항목 추가</button>
 
-          <label class="settings-section-label">지출 분류</label>
+          <label class="settings-section-label">변동비</label>
           <div id="categoryList"></div>
-          <button class="add-fixed-btn" id="addCategoryBtn">+ 분류 추가</button>
+          <button class="add-fixed-btn" id="addCategoryBtn">+ 변동비 분류 추가</button>
 
           <button class="btn btn-primary" id="saveSetupBtn">저장하기</button>
         </div>
-        <div style="text-align:center;font-size:10px;opacity:.5;margin-top:14px;font-family:'IBM Plex Mono',monospace;">v2.1</div>
+        <div style="text-align:center;font-size:10px;opacity:.5;margin-top:14px;font-family:'IBM Plex Mono',monospace;">v2.3</div>
       </div>
 
     </div>
@@ -332,10 +352,16 @@
 
   function normalizeConfig(cfg){
     const out = cfg || {};
+    if(!Number.isFinite(Number(out.budget))) out.budget = 1000000;
+    out.budget = Number(out.budget) || 0;
     if(!Array.isArray(out.fixedItems)) out.fixedItems = JSON.parse(JSON.stringify(defaultFixedItems));
     if(!Array.isArray(out.cats) || out.cats.length === 0) out.cats = [...DEFAULT_CATS];
     out.cats = [...new Set(out.cats.map(c => String(c || '').trim()).filter(Boolean))];
     if(out.cats.length === 0) out.cats = ['기타'];
+    if(!out.catBudgets || typeof out.catBudgets !== 'object' || Array.isArray(out.catBudgets)) out.catBudgets = {};
+    const cleanBudgets = {};
+    out.cats.forEach(cat => { cleanBudgets[cat] = Math.max(0, Number(out.catBudgets[cat]) || 0); });
+    out.catBudgets = cleanBudgets;
     return out;
   }
   function loadConfig(){
@@ -354,7 +380,7 @@
     if(prevKeys.length > 0){
       def = normalizeConfig(JSON.parse(localStorage.getItem(prevKeys[prevKeys.length - 1])));
     } else {
-      def = { budget: 1000000, fixedItems: JSON.parse(JSON.stringify(defaultFixedItems)), cats: [...DEFAULT_CATS] };
+      def = { budget: 1000000, fixedItems: JSON.parse(JSON.stringify(defaultFixedItems)), cats: [...DEFAULT_CATS], catBudgets: {} };
     }
     localStorage.setItem(key, JSON.stringify(def));
     return def;
@@ -403,6 +429,49 @@
   }
 
   function fmt(n){ return Math.round(n).toLocaleString('ko-KR') + '원'; }
+  function esc(v){
+    return String(v ?? '').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+  }
+  function allExpenseMonthsBefore(targetMonth = monthKey()){
+    return Object.keys(localStorage)
+      .filter(k => /^gb_expenses_\d{4}-\d{2}$/.test(k))
+      .map(k => k.slice('gb_expenses_'.length))
+      .filter(m => m < targetMonth)
+      .sort();
+  }
+  function sumExpenses(list, cat = null){
+    return list.filter(e => !cat || e.cat === cat).reduce((s,e)=>s + (Number(e.amt)||0), 0);
+  }
+  function variableStats(cfg){
+    const currentMonth = monthKey();
+    const prevMonth = shiftMonth(currentMonth, -1);
+    const current = loadExpenses(currentMonth);
+    const prev = loadExpenses(prevMonth);
+    const historyMonths = allExpenseMonthsBefore(currentMonth);
+    const historyLists = historyMonths.map(m => loadExpenses(m));
+    const avgFor = cat => historyLists.length
+      ? historyLists.reduce((s,list)=>s + sumExpenses(list, cat), 0) / historyLists.length
+      : 0;
+    const byCat = {};
+    cfg.cats.forEach(cat => {
+      byCat[cat] = {
+        budget: Number(cfg.catBudgets?.[cat]) || 0,
+        current: sumExpenses(current, cat),
+        prev: sumExpenses(prev, cat),
+        avg: avgFor(cat)
+      };
+    });
+    return {
+      total: {
+        budget: cfg.cats.reduce((s,cat)=>s + (Number(cfg.catBudgets?.[cat])||0), 0),
+        current: sumExpenses(current),
+        prev: sumExpenses(prev),
+        avg: avgFor(null)
+      },
+      byCat,
+      historyCount: historyLists.length
+    };
+  }
 
   function daysInMonth(){
     const d = new Date();
@@ -531,11 +600,11 @@
 
   /* ---------- render: settings ---------- */
   let currentFixedItems = [];
-  let currentCategories = [];
+  let currentVariableItems = [];
   function renderFixedList(items){
     $('fixedList').innerHTML = items.map((it, i) => `
       <div class="fixed-item" data-i="${i}">
-        <input name="name" value="${it.name}" placeholder="항목명">
+        <input name="name" value="${esc(it.name)}" placeholder="항목명">
         <input name="amt" type="number" value="${it.amt}" placeholder="금액">
         <div class="del" data-del="${i}">✕</div>
       </div>
@@ -557,42 +626,83 @@
     }));
   }
   function renderCategoryList(items){
-    $('categoryList').innerHTML = items.map((name, i) => `
+    $('categoryList').innerHTML = items.map((it, i) => `
       <div class="category-item" data-i="${i}">
-        <input name="catName" value="${String(name).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}" placeholder="분류 이름">
+        <input name="catName" value="${esc(it.name)}" placeholder="분류 이름">
+        <input name="catBudget" type="number" min="0" step="10000" value="${Math.max(0, Number(it.budget)||0)}" placeholder="예산">
+        <div class="cat-order-wrap">
+          <button type="button" class="cat-order-btn" data-cat-move="up" data-cat-i="${i}" ${i===0?'disabled':''}>↑</button>
+          <button type="button" class="cat-order-btn" data-cat-move="down" data-cat-i="${i}" ${i===items.length-1?'disabled':''}>↓</button>
+        </div>
         <div class="del" data-cat-del="${i}">✕</div>
       </div>
     `).join('');
     $('categoryList').querySelectorAll('[data-cat-del]').forEach(btn=>{
       btn.onclick = () => {
         syncCategoriesFromDOM();
-        if(currentCategories.length <= 1) return;
+        if(currentVariableItems.length <= 1) return;
         const i = parseInt(btn.getAttribute('data-cat-del'));
-        currentCategories.splice(i,1);
-        renderCategoryList(currentCategories);
+        currentVariableItems.splice(i,1);
+        renderCategoryList(currentVariableItems);
+      };
+    });
+    $('categoryList').querySelectorAll('[data-cat-move]').forEach(btn=>{
+      btn.onclick = () => {
+        syncCategoriesFromDOM();
+        const i = parseInt(btn.getAttribute('data-cat-i'));
+        const dir = btn.getAttribute('data-cat-move');
+        const j = dir === 'up' ? i - 1 : i + 1;
+        if(i < 0 || j < 0 || i >= currentVariableItems.length || j >= currentVariableItems.length) return;
+        [currentVariableItems[i], currentVariableItems[j]] = [currentVariableItems[j], currentVariableItems[i]];
+        renderCategoryList(currentVariableItems);
       };
     });
   }
   function syncCategoriesFromDOM(){
     const rows = $('categoryList').querySelectorAll('.category-item');
-    currentCategories = Array.from(rows)
-      .map(r => r.querySelector('[name=catName]').value.trim())
-      .filter(Boolean);
+    currentVariableItems = Array.from(rows).map(r => ({
+      name: r.querySelector('[name=catName]').value.trim(),
+      budget: Math.max(0, parseInt(r.querySelector('[name=catBudget]').value) || 0)
+    }));
   }
   function renderSettingsView(){
     const cfg = loadConfig();
-    const total = cfg.fixedItems.reduce((s,i)=>s+i.amt,0);
+    const fixedTotal = cfg.fixedItems.reduce((s,i)=>s+i.amt,0);
+    const stats = variableStats(cfg);
+    const historyLabel = stats.historyCount > 0 ? '전체평균' : '전체평균';
+    const statCells = st => `
+      <div class="stat-grid">
+        <div class="stat-cell"><span class="k">이번 달</span><span class="v">${fmt(st.current)}</span></div>
+        <div class="stat-cell"><span class="k">지난달</span><span class="v">${fmt(st.prev)}</span></div>
+        <div class="stat-cell"><span class="k">${historyLabel}</span><span class="v">${fmt(st.avg)}</span></div>
+      </div>`;
     $('settingsView').innerHTML = `
       <div class="card">
         <div class="mini-row"><span><b>월 예산</b></span><span class="v">${fmt(cfg.budget)}</span></div>
-        ${cfg.fixedItems.map(i=>`<div class="mini-row"><span>${i.name}</span><span class="v">${fmt(i.amt)}</span></div>`).join('')}
-        <div class="mini-row"><span><b>고정비 합계</b></span><span class="v red">-${fmt(total)}</span></div>
       </div>
+
+      <div class="settings-overview-grid">
+        <div class="overview-box"><div class="k">고정비</div><div class="v">${fmt(fixedTotal)}</div></div>
+        <div class="overview-box"><div class="k">변동비 예산</div><div class="v">${fmt(stats.total.budget)}</div></div>
+      </div>
+
       <div class="card">
-        <div class="mini-row"><span><b>지출 분류</b></span><span>${cfg.cats.length}개</span></div>
-        <div style="padding:12px 14px;display:flex;gap:6px;flex-wrap:wrap;">
-          ${cfg.cats.map(c=>`<span class="tag" style="font-size:10px;">${c}</span>`).join('')}
+        <div class="mini-row"><span><b>고정비</b></span><span class="v red">-${fmt(fixedTotal)}</span></div>
+        ${cfg.fixedItems.map(i=>`<div class="mini-row"><span>${esc(i.name)}</span><span class="v">${fmt(i.amt)}</span></div>`).join('')}
+      </div>
+
+      <div class="card">
+        <div class="variable-stat">
+          <div class="variable-stat-head"><b>변동비 총</b><span class="budget">예산 ${fmt(stats.total.budget)}</span></div>
+          ${statCells(stats.total)}
         </div>
+        ${cfg.cats.map(cat => {
+          const st = stats.byCat[cat];
+          return `<div class="variable-stat">
+            <div class="variable-stat-head"><b>${esc(cat)}</b><span class="budget">예산 ${fmt(st.budget)}</span></div>
+            ${statCells(st)}
+          </div>`;
+        }).join('')}
       </div>`;
   }
   let settingsEditing = false;
@@ -608,10 +718,10 @@
   function renderSettingsEdit(){
     const cfg = loadConfig();
     currentFixedItems = JSON.parse(JSON.stringify(cfg.fixedItems));
-    currentCategories = [...cfg.cats];
+    currentVariableItems = cfg.cats.map(name => ({ name, budget: Number(cfg.catBudgets?.[name]) || 0 }));
     $('setupBudget').value = cfg.budget;
     renderFixedList(currentFixedItems);
-    renderCategoryList(currentCategories);
+    renderCategoryList(currentVariableItems);
   }
   $('addFixedBtn').onclick = () => {
     syncFixedFromDOM();
@@ -620,8 +730,8 @@
   };
   $('addCategoryBtn').onclick = () => {
     syncCategoriesFromDOM();
-    currentCategories.push('');
-    renderCategoryList(currentCategories);
+    currentVariableItems.push({name:'', budget:0});
+    renderCategoryList(currentVariableItems);
     const inputs = $('categoryList').querySelectorAll('[name=catName]');
     if(inputs.length) inputs[inputs.length - 1].focus();
   };
@@ -633,8 +743,17 @@
     }));
     const budget = parseInt($('setupBudget').value) || 0;
     syncCategoriesFromDOM();
-    const cats = [...new Set(currentCategories)];
-    saveConfig({ budget, fixedItems: items, cats: cats.length ? cats : ['기타'] });
+    const unique = [];
+    const seen = new Set();
+    currentVariableItems.forEach(it => {
+      if(!it.name || seen.has(it.name)) return;
+      seen.add(it.name);
+      unique.push(it);
+    });
+    if(unique.length === 0) unique.push({name:'기타', budget:0});
+    const cats = unique.map(it => it.name);
+    const catBudgets = Object.fromEntries(unique.map(it => [it.name, Math.max(0, Number(it.budget)||0)]));
+    saveConfig({ budget, fixedItems: items, cats, catBudgets });
     renderMain(); renderLedger();
     setSettingsMode(false);
   };
