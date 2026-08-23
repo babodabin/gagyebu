@@ -4,7 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no">
 <meta name="apple-mobile-web-app-capable" content="yes">
-<meta name="apple-mobile-web-app-status-bar-style" content="black">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
 <meta name="apple-mobile-web-app-title" content="가계부">
 <link rel="apple-touch-icon" href="icon-180.png">
 <title>가계부</title>
@@ -50,7 +50,7 @@
 
   #app {
     max-width: 480px; margin: 0 auto; height: 100%;
-    padding: calc(env(safe-area-inset-top) + 24px) 0 0;
+    padding: calc(env(safe-area-inset-top) + 16px) 0 0;
     position: relative;
     display: flex; flex-direction: column;
   }
@@ -77,12 +77,10 @@
   .swiper { display: flex; height: 100%; transition: transform 0.3s cubic-bezier(.2,.7,.3,1); }
   .page {
     flex: 0 0 100%; width: 100%; height: 100%;
-    padding: 8px 18px calc(env(safe-area-inset-bottom) + 132px);
+    padding: 8px 18px calc(env(safe-area-inset-bottom) + 110px);
     overflow-y: auto; -webkit-overflow-scrolling: touch;
     overscroll-behavior-y: contain;
   }
-
-  #page-settings { padding-bottom: calc(env(safe-area-inset-bottom) + 24px); }
 
   /* ---------- main page ---------- */
   .today-label { font-size: 11px; opacity: 0.75; letter-spacing: 0.1em; margin-top: 22px; }
@@ -116,8 +114,7 @@
     max-width: 480px; width: calc(100% - 36px);
     background: rgba(255,255,255,0.75); color: var(--ink-soft);
     border: 1.5px solid var(--paper-line);
-    min-height: 66px; display: flex; align-items: center; justify-content: center;
-    border-radius: 33px; padding: 0 14px; font-size: 15px; font-weight: 600;
+    border-radius: 24px; padding: 13px; font-size: 13.5px; font-weight: 600;
     backdrop-filter: blur(4px);
     z-index: 30;
   }
@@ -140,7 +137,6 @@
   .nav-arrow:disabled { opacity: 0.3; }
   .past-note { font-size: 10.5px; opacity: 0.65; margin: -6px 0 10px; }
   .summary-strip .v { font-family: 'IBM Plex Mono', monospace; font-weight: 700; font-size: 15px; display: block; margin-top: 2px; }
-  .summary-strip .v.red { color: var(--stamp-red); }
   .ledger-date-head {
     font-size: 10px; font-family: 'IBM Plex Mono', monospace; opacity: 0.6;
     padding: 10px 2px 4px;
@@ -180,6 +176,14 @@
     width: 100%; padding: 10px; border: 1px dashed var(--paper-line); border-radius: 6px;
     background: transparent; color: var(--ink-soft); font-size: 12px; margin-bottom: 18px;
   }
+  .category-item {
+    display: grid; grid-template-columns: 1fr 30px; gap: 8px; margin-bottom: 8px; align-items: center;
+  }
+  .category-item input {
+    padding: 10px; border: 1px solid var(--paper-line); border-radius: 6px; font-size: 13px; background:#fff; color: var(--ink);
+  }
+  .category-item .del { text-align: center; opacity: 0.6; }
+  .settings-section-label { display:block; font-size:11px; opacity:.75; margin: 4px 0 8px; }
   .btn { padding: 13px; border-radius: 8px; border: none; font-size: 14px; font-weight: 600; width: 100%; }
   .modal-actions .btn { width: auto; flex: 1 1 0; min-width: 0; }
   .modal-actions #mDelete { flex: 0 0 auto; padding-left: 16px; padding-right: 16px; }
@@ -260,7 +264,7 @@
           <button class="chip" id="todayBtn" style="margin-left:auto;">오늘</button>
         </div>
         <div class="summary-strip">
-          <div>고정비<span class="v red" id="ledgerFixed">0원</span></div>
+          <div>고정비 차감 후<span class="v" id="ledgerAfterFixed">0원</span></div>
           <div>현재 잔액<span class="v" id="ledgerBalance">0원</span></div>
         </div>
         <div id="ledgerList"></div>
@@ -281,12 +285,17 @@
             <label>월 예산</label>
             <input type="number" id="setupBudget" placeholder="1000000">
           </div>
-          <label style="display:block;font-size:11px;opacity:.75;margin-bottom:8px;">고정비</label>
+          <label class="settings-section-label">고정비</label>
           <div id="fixedList"></div>
           <button class="add-fixed-btn" id="addFixedBtn">+ 고정비 항목 추가</button>
+
+          <label class="settings-section-label">지출 분류</label>
+          <div id="categoryList"></div>
+          <button class="add-fixed-btn" id="addCategoryBtn">+ 분류 추가</button>
+
           <button class="btn btn-primary" id="saveSetupBtn">저장하기</button>
         </div>
-        <div style="text-align:center;font-size:10px;opacity:.5;margin-top:14px;font-family:'IBM Plex Mono',monospace;">v2.2</div>
+        <div style="text-align:center;font-size:10px;opacity:.5;margin-top:14px;font-family:'IBM Plex Mono',monospace;">v2.1</div>
       </div>
 
     </div>
@@ -298,7 +307,7 @@
 <script>
 (function(){
   const $ = id => document.getElementById(id);
-  const CATS = ['식비','교통','생활','미용','기타'];
+  const DEFAULT_CATS = ['식비','교통','생활','미용','기타'];
   const PAYS = ['현금','신한카드','국민카드','현대카드'];
   const localDateStr = d => {
     const y = d.getFullYear();
@@ -321,23 +330,36 @@
     {name:'미용비', amt:50000},
   ];
 
+  function normalizeConfig(cfg){
+    const out = cfg || {};
+    if(!Array.isArray(out.fixedItems)) out.fixedItems = JSON.parse(JSON.stringify(defaultFixedItems));
+    if(!Array.isArray(out.cats) || out.cats.length === 0) out.cats = [...DEFAULT_CATS];
+    out.cats = [...new Set(out.cats.map(c => String(c || '').trim()).filter(Boolean))];
+    if(out.cats.length === 0) out.cats = ['기타'];
+    return out;
+  }
   function loadConfig(){
-    const raw = localStorage.getItem('gb_config_' + monthKey());
-    if(raw) return JSON.parse(raw);
+    const key = 'gb_config_' + monthKey();
+    const raw = localStorage.getItem(key);
+    if(raw){
+      const cfg = normalizeConfig(JSON.parse(raw));
+      localStorage.setItem(key, JSON.stringify(cfg));
+      return cfg;
+    }
     // 이번 달 설정이 없으면 가장 최근 달의 설정을 이어받음
     const prevKeys = Object.keys(localStorage)
       .filter(k => k.startsWith('gb_config_'))
       .sort();
     let def;
     if(prevKeys.length > 0){
-      def = JSON.parse(localStorage.getItem(prevKeys[prevKeys.length - 1]));
+      def = normalizeConfig(JSON.parse(localStorage.getItem(prevKeys[prevKeys.length - 1])));
     } else {
-      def = { budget: 1000000, fixedItems: JSON.parse(JSON.stringify(defaultFixedItems)) };
+      def = { budget: 1000000, fixedItems: JSON.parse(JSON.stringify(defaultFixedItems)), cats: [...DEFAULT_CATS] };
     }
-    localStorage.setItem('gb_config_' + monthKey(), JSON.stringify(def));
+    localStorage.setItem(key, JSON.stringify(def));
     return def;
   }
-  function saveConfig(cfg){ localStorage.setItem('gb_config_' + monthKey(), JSON.stringify(cfg)); }
+  function saveConfig(cfg){ localStorage.setItem('gb_config_' + monthKey(), JSON.stringify(normalizeConfig(cfg))); }
   function loadExpenses(month = monthKey()){
     const raw = localStorage.getItem('gb_expenses_' + month);
     return raw ? JSON.parse(raw) : [];
@@ -469,7 +491,7 @@
 
     const fixedTotal = cfg.fixedItems.reduce((s,i)=>s+i.amt,0);
     const spentTotal = expenses.reduce((s,e)=>s+e.amt,0);
-    $('ledgerFixed').textContent = '-' + fmt(fixedTotal);
+    $('ledgerAfterFixed').textContent = fmt(cfg.budget - fixedTotal);
     $('ledgerBalance').textContent = fmt(cfg.budget - fixedTotal - spentTotal);
 
     if(expenses.length === 0){
@@ -509,6 +531,7 @@
 
   /* ---------- render: settings ---------- */
   let currentFixedItems = [];
+  let currentCategories = [];
   function renderFixedList(items){
     $('fixedList').innerHTML = items.map((it, i) => `
       <div class="fixed-item" data-i="${i}">
@@ -533,6 +556,29 @@
       amt: parseInt(r.querySelector('[name=amt]').value) || 0
     }));
   }
+  function renderCategoryList(items){
+    $('categoryList').innerHTML = items.map((name, i) => `
+      <div class="category-item" data-i="${i}">
+        <input name="catName" value="${String(name).replace(/&/g,'&amp;').replace(/"/g,'&quot;').replace(/</g,'&lt;').replace(/>/g,'&gt;')}" placeholder="분류 이름">
+        <div class="del" data-cat-del="${i}">✕</div>
+      </div>
+    `).join('');
+    $('categoryList').querySelectorAll('[data-cat-del]').forEach(btn=>{
+      btn.onclick = () => {
+        syncCategoriesFromDOM();
+        if(currentCategories.length <= 1) return;
+        const i = parseInt(btn.getAttribute('data-cat-del'));
+        currentCategories.splice(i,1);
+        renderCategoryList(currentCategories);
+      };
+    });
+  }
+  function syncCategoriesFromDOM(){
+    const rows = $('categoryList').querySelectorAll('.category-item');
+    currentCategories = Array.from(rows)
+      .map(r => r.querySelector('[name=catName]').value.trim())
+      .filter(Boolean);
+  }
   function renderSettingsView(){
     const cfg = loadConfig();
     const total = cfg.fixedItems.reduce((s,i)=>s+i.amt,0);
@@ -541,6 +587,12 @@
         <div class="mini-row"><span><b>월 예산</b></span><span class="v">${fmt(cfg.budget)}</span></div>
         ${cfg.fixedItems.map(i=>`<div class="mini-row"><span>${i.name}</span><span class="v">${fmt(i.amt)}</span></div>`).join('')}
         <div class="mini-row"><span><b>고정비 합계</b></span><span class="v red">-${fmt(total)}</span></div>
+      </div>
+      <div class="card">
+        <div class="mini-row"><span><b>지출 분류</b></span><span>${cfg.cats.length}개</span></div>
+        <div style="padding:12px 14px;display:flex;gap:6px;flex-wrap:wrap;">
+          ${cfg.cats.map(c=>`<span class="tag" style="font-size:10px;">${c}</span>`).join('')}
+        </div>
       </div>`;
   }
   let settingsEditing = false;
@@ -556,13 +608,22 @@
   function renderSettingsEdit(){
     const cfg = loadConfig();
     currentFixedItems = JSON.parse(JSON.stringify(cfg.fixedItems));
+    currentCategories = [...cfg.cats];
     $('setupBudget').value = cfg.budget;
     renderFixedList(currentFixedItems);
+    renderCategoryList(currentCategories);
   }
   $('addFixedBtn').onclick = () => {
     syncFixedFromDOM();
     currentFixedItems.push({name:'', amt:0});
     renderFixedList(currentFixedItems);
+  };
+  $('addCategoryBtn').onclick = () => {
+    syncCategoriesFromDOM();
+    currentCategories.push('');
+    renderCategoryList(currentCategories);
+    const inputs = $('categoryList').querySelectorAll('[name=catName]');
+    if(inputs.length) inputs[inputs.length - 1].focus();
   };
   $('saveSetupBtn').onclick = () => {
     const rows = $('fixedList').querySelectorAll('.fixed-item');
@@ -571,7 +632,9 @@
       amt: parseInt(r.querySelector('[name=amt]').value) || 0
     }));
     const budget = parseInt($('setupBudget').value) || 0;
-    saveConfig({ budget, fixedItems: items });
+    syncCategoriesFromDOM();
+    const cats = [...new Set(currentCategories)];
+    saveConfig({ budget, fixedItems: items, cats: cats.length ? cats : ['기타'] });
     renderMain(); renderLedger();
     setSettingsMode(false);
   };
@@ -581,7 +644,7 @@
   function snapToPage(i){
     $('swiper').style.transform = `translateX(-${i * 100}%)`;
     document.querySelectorAll('.dot').forEach((d,idx)=> d.classList.toggle('active', idx===i));
-    $('addExpenseBtn').style.display = i === 2 ? 'none' : 'flex';
+    $('addExpenseBtn').style.display = i === 2 ? 'none' : 'block';
     $('calendarBtn').classList.toggle('active', i===1);
     $('settingsBtn').classList.toggle('active', i===2);
   }
@@ -640,7 +703,10 @@
 
   /* ---------- add / edit expense modal ---------- */
   function openExpenseModal(existing){
-    let selectedCat = existing ? existing.cat : CATS[0];
+    const cfg = loadConfig();
+    const cats = [...cfg.cats];
+    if(existing && existing.cat && !cats.includes(existing.cat)) cats.push(existing.cat);
+    let selectedCat = existing ? existing.cat : cats[0];
     let selectedPay = existing ? existing.pay : PAYS[0];
     const backdrop = document.createElement('div');
     backdrop.className = 'modal-backdrop';
@@ -657,7 +723,7 @@
         </div>
         <div class="field">
           <label>분류</label>
-          <div class="chip-row" id="catChips">${CATS.map(c=>`<button class="chip${c===selectedCat?' selected':''}" data-c="${c}">${c}</button>`).join('')}</div>
+          <div class="chip-row" id="catChips">${cats.map(c=>`<button class="chip${c===selectedCat?' selected':''}" data-c="${c}">${c}</button>`).join('')}</div>
         </div>
         <div class="field">
           <label>결제수단</label>
