@@ -345,7 +345,7 @@
 
           <button class="btn btn-primary" id="saveSetupBtn">저장하기</button>
         </div>
-        <div style="text-align:center;font-size:10px;opacity:.5;margin-top:14px;font-family:'IBM Plex Mono',monospace;">v2.5</div>
+        <div style="text-align:center;font-size:10px;opacity:.5;margin-top:14px;font-family:'IBM Plex Mono',monospace;">v2.6</div>
       </div>
 
     </div>
@@ -1033,20 +1033,9 @@
       }
     }
 
-    // 결제 + 취소 쌍 → 둘 다 제외
-    const result = [];
-    const cancels = items.filter(x => x.kind === 'cancel');
-    const pool = items.filter(x => x.kind !== 'cancel');
-    const removed = new Set();
-    const orphanCancels = [];
-    cancels.forEach(c => {
-      const idx = pool.findIndex((p, k) => !removed.has(k) && p.kind === 'normal' && p.amt === c.amt && p.memo === c.memo);
-      if(idx > -1) removed.add(idx); else orphanCancels.push(c);
-    });
-    let pairCount = cancels.length - orphanCancels.length;
-    pool.forEach((p, k) => { if(!removed.has(k)) result.push(p); });
-    orphanCancels.forEach(c => result.push(c));
-    return { items: result, pairCount };
+    // 토스에서 "취소 |" 건은 그 자체가 이미 취소된 결제 → 그 줄만 빼고 나머지는 그대로 기록
+    const pairCount = items.filter(x => x.kind === 'cancel').length;
+    return { items: items.filter(x => x.kind !== 'cancel'), pairCount };
   }
 
   // 정확히 같은 기록, 또는 금액이 같고 날짜가 3일 이내인 기록을 찾음
@@ -1280,7 +1269,7 @@
   function renderPreview(items, pairCount, backdrop, fromPhoto){
     const box = $('pResult');
     if(items.length === 0){
-      box.innerHTML = `<div class="empty-note">가져올 카드 결제를 찾지 못했어요${pairCount ? ` (결제·취소 ${pairCount}쌍은 제외됨)` : ''}</div>`;
+      box.innerHTML = `<div class="empty-note">가져올 카드 결제를 찾지 못했어요${pairCount ? ` (취소된 결제 ${pairCount}건 제외됨)` : ''}</div>`;
       return;
     }
     items.forEach(it => {
@@ -1295,7 +1284,7 @@
       const onCount = items.filter(it => it.on).length;
       box.innerHTML = `
         <div class="imp-summary" style="margin-top:14px;">
-          ${items.length}건 찾음${pairCount ? ` · 결제·취소 ${pairCount}쌍 제외` : ''}${askCount ? ` · <b style="color:var(--stamp-gold)">확인 필요 ${askCount}건</b>` : ''}<br>
+          ${items.length}건 찾음${pairCount ? ` · 취소된 결제 ${pairCount}건 제외` : ''}${askCount ? ` · <b style="color:var(--stamp-gold)">확인 필요 ${askCount}건</b>` : ''}<br>
           ${fromPhoto ? '취소(줄 그어진) 건은 이미 취소된 결제라 빼고, 노란 표시만 확인해주세요.' : '날짜는 캡처 순서로 추정한 값이라 꼭 확인해주세요.'}
         </div>
         ${items.map((it, k) => {
