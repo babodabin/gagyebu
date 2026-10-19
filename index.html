@@ -108,16 +108,46 @@
   .mini-row .v.teal { color: var(--stamp-teal); }
 
   /* ---------- add-expense button (softened) ---------- */
-  .add-btn {
+  .bottom-bar {
     position: fixed; bottom: calc(env(safe-area-inset-bottom) + 20px);
     left: 50%; transform: translateX(-50%);
     max-width: 480px; width: calc(100% - 36px);
+    display: flex; gap: 8px; z-index: 30;
+  }
+  .add-btn {
+    flex: 1 1 0;
     background: rgba(255,255,255,0.75); color: var(--ink-soft);
     border: 1.5px solid var(--paper-line);
     border-radius: 24px; padding: 13px; font-size: 13.5px; font-weight: 600;
     backdrop-filter: blur(4px);
-    z-index: 30;
   }
+
+  /* ---------- toss paste sheet ---------- */
+  .paste-area {
+    width: 100%; min-height: 120px; padding: 10px 12px; font-size: 12.5px;
+    border: 1px solid var(--paper-line); border-radius: 6px; background: #fff;
+    color: var(--ink); font-family: inherit; resize: vertical;
+  }
+  .modal-sheet.tall { max-height: 88vh; overflow-y: auto; }
+  .imp-row {
+    background: #fff; border: 1px solid var(--paper-line); border-radius: 6px;
+    padding: 10px 12px; margin-bottom: 8px; font-size: 12.5px;
+  }
+  .imp-row.off { opacity: 0.45; }
+  .imp-row.ask { border-color: var(--stamp-gold); border-width: 1.5px; }
+  .imp-top { display: flex; align-items: center; gap: 8px; }
+  .imp-top input[type=checkbox] { width: 20px; height: 20px; flex: none; }
+  .imp-top .m { flex: 1; font-weight: 600; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  .imp-top .a { font-family: 'IBM Plex Mono', monospace; font-weight: 700; color: var(--stamp-red); }
+  .imp-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 6px; margin-top: 8px; }
+  .imp-grid input, .imp-grid select {
+    width: 100%; padding: 7px 6px; border: 1px solid var(--paper-line); border-radius: 5px;
+    font-size: 12px; background: #fff; color: var(--ink); font-family: inherit; min-width: 0;
+  }
+  .imp-note { font-size: 11px; color: var(--stamp-gold); margin-top: 6px; }
+  .imp-q { margin-top: 8px; display: flex; flex-wrap: wrap; gap: 6px; }
+  .imp-q .chip { padding: 7px 11px; font-size: 11.5px; }
+  .imp-summary { font-size: 11.5px; opacity: 0.7; margin: 4px 0 12px; line-height: 1.6; }
 
   /* ---------- ledger page ---------- */
   .summary-strip {
@@ -315,13 +345,16 @@
 
           <button class="btn btn-primary" id="saveSetupBtn">저장하기</button>
         </div>
-        <div style="text-align:center;font-size:10px;opacity:.5;margin-top:14px;font-family:'IBM Plex Mono',monospace;">v2.3</div>
+        <div style="text-align:center;font-size:10px;opacity:.5;margin-top:14px;font-family:'IBM Plex Mono',monospace;">v2.4</div>
       </div>
 
     </div>
   </div>
 
-  <button class="add-btn" id="addExpenseBtn">+ 지출 입력</button>
+  <div class="bottom-bar" id="bottomBar">
+    <button class="add-btn" id="addExpenseBtn">+ 지출 입력</button>
+    <button class="add-btn" id="pasteBtn">📋 토스 붙여넣기</button>
+  </div>
 </div>
 
 <script>
@@ -579,7 +612,7 @@
           <span>${e.memo || e.cat}
             <div class="tags"><span class="tag">${e.cat}</span><span class="tag pay">${e.pay}</span></div>
           </span>
-          <span class="amt">-${e.amt.toLocaleString('ko-KR')}</span>
+          <span class="amt"${e.amt < 0 ? ' style="color:var(--stamp-teal)"' : ''}>${e.amt < 0 ? '+' + (-e.amt).toLocaleString('ko-KR') : '-' + e.amt.toLocaleString('ko-KR')}</span>
         </div>`;
     });
     $('ledgerList').innerHTML = html;
@@ -763,7 +796,7 @@
   function snapToPage(i){
     $('swiper').style.transform = `translateX(-${i * 100}%)`;
     document.querySelectorAll('.dot').forEach((d,idx)=> d.classList.toggle('active', idx===i));
-    $('addExpenseBtn').style.display = i === 2 ? 'none' : 'block';
+    $('bottomBar').style.display = i === 2 ? 'none' : 'flex';
     $('calendarBtn').classList.toggle('active', i===1);
     $('settingsBtn').classList.toggle('active', i===2);
   }
@@ -927,6 +960,240 @@
     };
   }
   $('addExpenseBtn').onclick = () => openExpenseModal(null);
+
+  /* ---------- toss paste import ---------- */
+  function cardToPay(card){
+    if(/현대/.test(card)) return '현대카드';
+    if(/deep\s*dream|신한/i.test(card)) return '신한카드';
+    if(/국민|KB|t-?economy/i.test(card)) return '국민카드';
+    return null;
+  }
+  function guessCatRaw(m){
+    if(/코스트코|컬리|kurly|마트|편의점|GS25|CU|세븐|이마트|홈플러스|푸르네|카페|커피|스타벅스|배달|식당/i.test(m)) return '식비';
+    if(/다이소|올리브영|쿠팡|생활/i.test(m)) return '생활';
+    if(/버스|지하철|택시|교통|코레일/i.test(m)) return '교통';
+    if(/미용|헤어|무지|muji/i.test(m)) return '미용';
+    return '기타';
+  }
+  function guessCat(m){
+    const cats = loadConfig().cats;
+    const g = guessCatRaw(m);
+    if(cats.includes(g)) return g;
+    return cats.includes('기타') ? '기타' : cats[cats.length - 1];
+  }
+  function dayToDate(day){
+    const now = new Date();
+    let y = now.getFullYear(), m = now.getMonth() + 1;
+    if(day > now.getDate()){ m -= 1; if(m < 1){ m = 12; y -= 1; } } // 오늘보다 큰 날짜는 지난달
+    return `${y}-${String(m).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+  }
+
+  function parseToss(text){
+    const lines = text.split(/\r?\n/).map(s => s.trim()).filter(Boolean)
+      // 토스 배너 글자 무시 ("7건 / 캐시백 가능한 내역 / 확인하기" 등)
+      .filter(s => !/^확인하기$|캐시백|^\d+건$/.test(s));
+    const items = [];
+    let curDate = todayKey();
+    for(let i = 0; i < lines.length; i++){
+      const dm = lines[i].match(/^(\d{1,2})일\s*[월화수목금토일]요일$/);
+      if(dm){ curDate = dayToDate(parseInt(dm[1])); continue; }
+
+      const am = lines[i].match(/^-\s?([\d,]+)\s?원$/);
+      if(!am) continue;                         // +금액(입금)이나 기타 조각은 무시
+      const amt = parseInt(am[1].replace(/,/g,''));
+      // 라이브 텍스트가 "|"를 l·I·｜로 읽는 경우 보정
+      const next = (lines[i+1] || '').replace(/｜/g,'|').replace(/\s[lI]\s/g,' | ');
+
+      // 계좌에서 나간 것 (화살표)
+      if(/->|→/.test(next)){
+        i++;
+        if(/서울페이/.test(next)){
+          items.push({ date: curDate, amt, memo: '서울페이 충전', cat: guessCat('서울페이'), pay: '현금', kind: 'normal' });
+        }
+        continue;                               // 대출이자·계좌이체·인출은 제외
+      }
+      if(/인출|대출이자/.test(next)){ i++; continue; }
+
+      if(next.includes('|')){
+        i++;
+        let parts = next.split('|').map(s => s.trim()).filter(Boolean);
+        let cancel = false;
+        if(parts[0] === '취소'){ cancel = true; parts = parts.slice(1); }
+        const memo = parts[0] || '';
+        const pay = cardToPay(parts[1] || '');
+        items.push({
+          date: curDate, amt, memo, cat: guessCat(memo),
+          pay: pay || '현금', kind: cancel ? 'cancel' : 'normal',
+          payUnknown: !pay
+        });
+      } else {
+        // 금액만 있고 가맹점 줄이 없음 (예: "확인하기")
+        if(next && !/^-?[\d,]+\s?원$/.test(next) && !/일\s*[월화수목금토일]요일$/.test(next)) i++;
+        items.push({ date: curDate, amt, memo: '', cat: guessCat(''), pay: '현금', kind: 'unknown' });
+      }
+    }
+
+    // 결제 + 취소 쌍 → 둘 다 제외
+    const result = [];
+    const cancels = items.filter(x => x.kind === 'cancel');
+    const pool = items.filter(x => x.kind !== 'cancel');
+    const removed = new Set();
+    const orphanCancels = [];
+    cancels.forEach(c => {
+      const idx = pool.findIndex((p, k) => !removed.has(k) && p.kind === 'normal' && p.amt === c.amt && p.memo === c.memo);
+      if(idx > -1) removed.add(idx); else orphanCancels.push(c);
+    });
+    let pairCount = cancels.length - orphanCancels.length;
+    pool.forEach((p, k) => { if(!removed.has(k)) result.push(p); });
+    orphanCancels.forEach(c => result.push(c));
+    return { items: result, pairCount };
+  }
+
+  // 정확히 같은 기록, 또는 금액이 같고 날짜가 3일 이내인 기록을 찾음
+  function sameAsSaved(it){
+    const mk = it.date.slice(0,7);
+    const pool = [shiftMonth(mk,-1), mk, shiftMonth(mk,1)].flatMap(m => loadExpenses(m));
+    const exact = pool.find(e => e.date === it.date && e.amt === it.amt && (e.memo || '') === it.memo);
+    if(exact) return { e: exact, exact: true };
+    const t = new Date(it.date + 'T00:00:00').getTime();
+    const near = pool.find(e => e.amt === it.amt &&
+      Math.abs(new Date(e.date + 'T00:00:00').getTime() - t) <= 3 * 86400000);
+    return near ? { e: near, exact: false } : null;
+  }
+
+  function openPasteSheet(){
+    const backdrop = document.createElement('div');
+    backdrop.className = 'modal-backdrop';
+    backdrop.innerHTML = `
+      <div class="modal-sheet tall">
+        <h3>토스 내역 붙여넣기</h3>
+        <div class="imp-summary">캡처 → 사진 앱에서 글자 길게 눌러 전체 복사 → 아래에 붙여넣기</div>
+        <textarea class="paste-area" id="pText" placeholder="여기에 붙여넣기"></textarea>
+        <div class="modal-actions">
+          <button class="btn btn-secondary" id="pCancel">닫기</button>
+          <button class="btn btn-primary" id="pRead">읽기</button>
+        </div>
+        <div id="pResult"></div>
+      </div>`;
+    document.body.appendChild(backdrop);
+    backdrop.addEventListener('click', e => { if(e.target === backdrop) backdrop.remove(); });
+    $('pCancel').onclick = () => backdrop.remove();
+
+    try {
+      if(navigator.clipboard && navigator.clipboard.readText){
+        navigator.clipboard.readText().then(t => { if(t && !$('pText').value) $('pText').value = t; }).catch(()=>{});
+      }
+    } catch(e){}
+
+    $('pRead').onclick = () => {
+      const { items, pairCount } = parseToss($('pText').value);
+      renderPreview(items, pairCount, backdrop);
+    };
+  }
+
+  function renderPreview(items, pairCount, backdrop){
+    const box = $('pResult');
+    if(items.length === 0){
+      box.innerHTML = `<div class="empty-note">가져올 카드 결제를 찾지 못했어요${pairCount ? ` (결제·취소 ${pairCount}쌍은 제외됨)` : ''}</div>`;
+      return;
+    }
+    items.forEach(it => {
+      it.dup = it.kind === 'cancel' ? null : sameAsSaved(it);
+      it.on = !it.dup && it.kind === 'normal';
+      it.answer = null;
+    });
+
+    const opt = (arr, v) => arr.map(x => `<option${x===v?' selected':''}>${x}</option>`).join('');
+    function draw(){
+      const askCount = items.filter(it => (it.kind === 'cancel' || it.kind === 'unknown') && !it.answer).length;
+      const onCount = items.filter(it => it.on).length;
+      box.innerHTML = `
+        <div class="imp-summary" style="margin-top:14px;">
+          ${items.length}건 찾음${pairCount ? ` · 결제·취소 ${pairCount}쌍 제외` : ''}${askCount ? ` · <b style="color:var(--stamp-gold)">확인 필요 ${askCount}건</b>` : ''}<br>
+          날짜는 캡처 순서로 추정한 값이라 꼭 확인해주세요.
+        </div>
+        ${items.map((it, k) => {
+          const isAsk = it.kind === 'cancel' || it.kind === 'unknown';
+          let q = '';
+          if(it.kind === 'cancel'){
+            const saved = loadExpenses(it.date.slice(0,7)).find(e => e.amt === it.amt && (e.memo||'') === it.memo);
+            q = `<div class="imp-note">취소 건인데 같은 결제가 이 캡처에 없어요. 어떻게 할까요?</div>
+              <div class="imp-q">
+                ${saved ? `<button class="chip${it.answer==='delSaved'?' selected':''}" data-k="${k}" data-a="delSaved">기존 기록(${saved.date.slice(5).replace('-','.')}) 삭제</button>` : ''}
+                <button class="chip${it.answer==='refund'?' selected':''}" data-k="${k}" data-a="refund">환불로 기록</button>
+                <button class="chip${it.answer==='skip'?' selected':''}" data-k="${k}" data-a="skip">무시</button>
+              </div>`;
+          } else if(it.kind === 'unknown'){
+            q = `<div class="imp-note">가맹점이 안 보여요. 지출이 맞나요?</div>
+              <div class="imp-q">
+                <button class="chip${it.answer==='keep'?' selected':''}" data-k="${k}" data-a="keep">지출 맞음</button>
+                <button class="chip${it.answer==='skip'?' selected':''}" data-k="${k}" data-a="skip">빼기</button>
+              </div>`;
+          }
+          const checkable = !isAsk;
+          return `
+          <div class="imp-row${(!it.on && !(isAsk && it.answer && it.answer!=='skip')) ? ' off' : ''}${isAsk ? ' ask' : ''}">
+            <div class="imp-top">
+              ${checkable ? `<input type="checkbox" data-chk="${k}"${it.on?' checked':''}>` : ''}
+              <span class="m">${it.kind==='cancel' ? '[취소] ' : ''}${esc(it.memo) || '(가맹점 없음)'}</span>
+              <span class="a">${it.kind==='cancel' ? '+' : '-'}${it.amt.toLocaleString('ko-KR')}</span>
+            </div>
+            ${it.dup ? (it.dup.exact
+              ? '<div class="imp-note">이미 같은 날짜·금액·가맹점으로 기록돼 있어요 (기본 제외)</div>'
+              : `<div class="imp-note">이미 기록된 것 같아요: ${it.dup.e.date.slice(5).replace('-','.')} ${esc(it.dup.e.memo || it.dup.e.cat)} 같은 금액 (기본 제외, 다른 건이면 체크)</div>`) : ''}
+            ${it.kind !== 'cancel' ? `
+            <div class="imp-grid">
+              <input type="date" data-f="date" data-k="${k}" value="${it.date}">
+              <select data-f="cat" data-k="${k}">${opt(loadConfig().cats.includes(it.cat) ? loadConfig().cats : [...loadConfig().cats, it.cat], it.cat)}</select>
+              <select data-f="pay" data-k="${k}">${opt(PAYS, it.pay)}</select>
+            </div>
+            ${it.kind==='unknown' ? `<div class="imp-grid" style="grid-template-columns:1fr;"><input type="text" data-f="memo" data-k="${k}" placeholder="가맹점/메모" value="${esc(it.memo)}"></div>` : ''}
+            ${it.payUnknown ? '<div class="imp-note">카드를 알아보지 못해 현금으로 넣었어요. 확인해주세요.</div>' : ''}
+            ` : ''}
+            ${q}
+          </div>`;
+        }).join('')}
+        <button class="btn btn-primary" id="pSave" style="margin-top:6px;${askCount ? 'opacity:.4;' : ''}"${askCount ? ' disabled' : ''}>${askCount ? '확인 필요한 항목을 먼저 골라주세요' : '선택한 항목 저장'}</button>`;
+
+      box.querySelectorAll('[data-chk]').forEach(c => c.onchange = () => { items[+c.dataset.chk].on = c.checked; draw(); });
+      box.querySelectorAll('[data-f]').forEach(el => el.onchange = el.oninput = () => { items[+el.dataset.k][el.dataset.f] = el.value; });
+      box.querySelectorAll('[data-a]').forEach(b => b.onclick = () => {
+        const it = items[+b.dataset.k];
+        it.answer = b.dataset.a;
+        it.on = (it.answer === 'keep' || it.answer === 'refund');
+        draw();
+      });
+      const save = $('pSave');
+      if(save && !askCount) save.onclick = () => {
+        let base = Date.now();
+        let saved = 0;
+        items.forEach(it => {
+          if(it.kind === 'cancel' && it.answer === 'delSaved'){
+            const mk = it.date.slice(0,7);
+            const list = loadExpenses(mk);
+            const idx = list.findIndex(e => e.amt === it.amt && (e.memo||'') === it.memo);
+            if(idx > -1){ list.splice(idx,1); saveExpenses(list, mk); saved++; }
+            return;
+          }
+          if(!it.on) return;
+          const mk = it.date.slice(0,7);
+          const list = loadExpenses(mk);
+          list.push({
+            id: base++, date: it.date,
+            amt: it.kind === 'cancel' ? -it.amt : it.amt,
+            cat: it.cat, pay: it.pay,
+            memo: it.kind === 'cancel' ? (it.memo + ' 환불') : it.memo.trim()
+          });
+          saveExpenses(list, mk);
+          saved++;
+        });
+        backdrop.remove();
+        renderMain(); renderLedger();
+      };
+    }
+    draw();
+  }
+  $('pasteBtn').onclick = openPasteSheet;
 
   /* ---------- init ---------- */
   repairExpenseMonthBuckets();
