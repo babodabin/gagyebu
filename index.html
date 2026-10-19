@@ -345,7 +345,7 @@
 
           <button class="btn btn-primary" id="saveSetupBtn">저장하기</button>
         </div>
-        <div style="text-align:center;font-size:10px;opacity:.5;margin-top:14px;font-family:'IBM Plex Mono',monospace;">v2.4</div>
+        <div style="text-align:center;font-size:10px;opacity:.5;margin-top:14px;font-family:'IBM Plex Mono',monospace;">v2.5</div>
       </div>
 
     </div>
@@ -353,7 +353,7 @@
 
   <div class="bottom-bar" id="bottomBar">
     <button class="add-btn" id="addExpenseBtn">+ 지출 입력</button>
-    <button class="add-btn" id="pasteBtn">📋 토스 붙여넣기</button>
+    <button class="add-btn" id="pasteBtn">📷 토스 가져오기</button>
   </div>
 </div>
 
@@ -969,7 +969,7 @@
     return null;
   }
   function guessCatRaw(m){
-    if(/코스트코|컬리|kurly|마트|편의점|GS25|CU|세븐|이마트|홈플러스|푸르네|카페|커피|스타벅스|배달|식당/i.test(m)) return '식비';
+    if(/코스트코|컬리|kurly|마트|편의점|GS25|CU|세븐|이마트|홈플러스|푸르네|카페|커피|스타벅스|바나프레소|메가|컴포즈|빽다방|투썸|이디야|배달|식당/i.test(m)) return '식비';
     if(/다이소|올리브영|쿠팡|생활/i.test(m)) return '생활';
     if(/버스|지하철|택시|교통|코레일/i.test(m)) return '교통';
     if(/미용|헤어|무지|muji/i.test(m)) return '미용';
@@ -1061,17 +1061,196 @@
     return near ? { e: near, exact: false } : null;
   }
 
+  /* ---------- toss screenshot (OCR) parser ---------- */
+  // images: [{ lines: [{y, c, t}] }]  — 위치(y)순으로 정렬해 날짜 머리글을 정확히 붙임
+  function ocrCard(card){
+    if(/현대|edition|리워드/i.test(card)) return '현대카드';
+    if(/dream|platinum|미니언즈|신한/i.test(card)) return '신한카드';
+    if(/econom|국민|KB/i.test(card)) return '국민카드';
+    return null;
+  }
+  function ocrAmount(t){
+    // 앞쪽 아이콘 잡음은 무시하고 "-금액원" 부분만 찾음 (원이 &, 윈, 워, ¢, %로 읽히는 경우 포함)
+    const m = t.match(/-\s?(\d{1,3}(?:[,.]\d{3})+|\d{3,7})\s?(원|윈|워|&|¢|%|%!)?\s*$/);
+    if(!m) return null;
+    if(!m[2] && !/[,.]/.test(m[1])) return null;   // 쉼표도 "원"도 없으면 금액으로 보기 어려움
+    return parseInt(m[1].replace(/[,.]/g,''));
+  }
+  function ocrDate(monthHint, day){
+    const now = new Date();
+    let y = now.getFullYear(), m = monthHint || (now.getMonth() + 1);
+    if(!monthHint && day > now.getDate()){ m -= 1; }
+    if(m > now.getMonth() + 1) y -= 1;               // 지금보다 뒤의 달이면 작년
+    if(m < 1){ m = 12; y -= 1; }
+    return `${y}-${String(m).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+  }
+  function addDays(dateStr, n){
+    const d = new Date(dateStr + 'T00:00:00'); d.setDate(d.getDate() + n);
+    return localDateStr(d);
+  }
+
+  function parseTossImages(images){
+    const all = [];
+    images.forEach((img, imgIdx) => {
+      const lines = img.lines.slice().sort((a,b) => a.y - b.y)
+        .map(l => ({ ...l, t: l.t.replace(/｜/g,'|').replace(/\s[lI]\s/g,' | ') }));
+      let monthHint = null;
+      const mh = lines.slice(0, 4).map(l => l.t.match(/(\d{1,2})\s?월/)).find(Boolean);
+      if(mh) monthHint = parseInt(mh[1]);
+
+      const items = [];
+      let curDate = null;
+      let pendingAmt = null;     // { amt, conf } 아직 가맹점 줄을 못 만난 금액
+      const flushUnknown = () => {
+        if(pendingAmt) items.push({ amt: pendingAmt.amt, amtCheck: pendingAmt.conf < 70, img: imgIdx,
+          date: curDate, dateGuess: !curDate, memo: '', pay: '현금', kind: 'unknown' });
+        pendingAmt = null;
+      };
+      for(const l of lines){
+        const dm = l.t.match(/(\d{1,2})일\s*[월화수목금토일]요일/);
+        if(dm){ flushUnknown(); curDate = ocrDate(monthHint, parseInt(dm[1])); continue; }
+
+        // 상단 달력의 일별 합계 줄 (금액이 여러 개) 무시
+        if((l.t.match(/-\s?\d[\d,.]{2,}/g) || []).length >= 2) continue;
+        const amt = ocrAmount(l.t);
+        if(amt !== null){ flushUnknown(); pendingAmt = { amt, conf: l.c }; continue; }
+
+        const isTransfer = /계좌|>|→/.test(l.t) && !l.t.includes('|');
+        const isMerchant = l.t.includes('|');
+        if(!isTransfer && !isMerchant){ continue; }   // 잡음·버튼·배너
+
+        // 취소 줄: 토스에서 줄 그어진 건 = 이미 취소된 결제 → 건너뜀
+        if(/취소\s*\|/.test(l.t)){ pendingAmt = null; continue; }
+        if(!pendingAmt) continue;                       // 위가 잘려 금액이 없는 줄
+
+        const base = { amt: pendingAmt.amt, amtCheck: pendingAmt.conf < 70, img: imgIdx,
+                       date: curDate, dateGuess: !curDate };
+        pendingAmt = null;
+
+        if(isTransfer){
+          if(/서울페이/.test(l.t)) items.push({ ...base, memo: '서울페이 충전', pay: '현금', kind: 'normal' });
+          continue;                                     // 대출이자·이체·인출 제외
+        }
+        if(/대출이자|인출/.test(l.t)) continue;
+        const parts = l.t.split('|').map(s => s.trim());
+        const memo = parts[0].replace(/^[^가-힣A-Za-z0-9]+/, '').trim();
+        const pay = ocrCard(parts.slice(1).join(' '));
+        items.push({ ...base, memo, pay: pay || '현금', payUnknown: !pay, kind: 'normal' });
+      }
+      flushUnknown();
+      // 화면 맨 위(첫 날짜 머리글보다 위)의 건: 첫 머리글 다음 날로 추정
+      const firstDate = items.find(it => it.date)?.date || null;
+      items.forEach(it => {
+        if(!it.date){
+          let g = firstDate ? addDays(firstDate, 1) : todayKey();
+          if(g > todayKey()) g = todayKey();
+          it.date = g;
+          it.dateGuess = g !== todayKey();
+        }
+      });
+      all.push(...items);
+    });
+
+    // 여러 장에 겹쳐 찍힌 건은 하나만 (같은 날짜·금액, 다른 사진)
+    const result = [];
+    all.forEach(it => {
+      const twin = result.find(r => r.img !== it.img && r.date === it.date && r.amt === it.amt && !r._twin);
+      if(twin){
+        twin._twin = true;
+        if(twin.kind === 'unknown' && it.kind === 'normal'){ Object.assign(twin, { kind: 'normal', memo: it.memo, pay: it.pay, payUnknown: it.payUnknown }); }
+        else if(it.kind === 'normal'){
+          if(twin.payUnknown && !it.payUnknown){ twin.pay = it.pay; twin.payUnknown = false; }
+          if(it.memo.length > twin.memo.length) twin.memo = it.memo;
+        }
+        if(!it.amtCheck) twin.amtCheck = false;
+        if(!it.dateGuess) twin.dateGuess = false;
+        return;
+      }
+      result.push(it);
+    });
+    result.forEach(it => { it.cat = guessCat(it.memo); delete it._twin; });
+    return result;
+  }
+
+  let tessLoading = null;
+  function loadTesseract(){
+    if(window.Tesseract) return Promise.resolve();
+    if(tessLoading) return tessLoading;
+    tessLoading = new Promise((res, rej) => {
+      const sc = document.createElement('script');
+      sc.src = 'https://cdn.jsdelivr.net/npm/tesseract.js@5/dist/tesseract.min.js';
+      sc.onload = res; sc.onerror = () => { tessLoading = null; rej(new Error('글자 인식 도구를 불러오지 못했어요 (인터넷 연결 확인)')); };
+      document.head.appendChild(sc);
+    });
+    return tessLoading;
+  }
+  // 다크모드 캡처 → 흰 바탕 검은 글씨로 바꿔서 인식률을 높임
+  function prepImage(file){
+    return new Promise((res, rej) => {
+      const img = new Image();
+      img.onload = () => {
+        const c = document.createElement('canvas');
+        c.width = img.naturalWidth; c.height = img.naturalHeight;
+        const ctx = c.getContext('2d');
+        ctx.drawImage(img, 0, 0);
+        const d = ctx.getImageData(0, 0, c.width, c.height); const px = d.data;
+        const gray = new Uint8ClampedArray(px.length / 4);
+        let sum = 0;
+        for(let i = 0, j = 0; i < px.length; i += 4, j++){ const g = 0.299*px[i] + 0.587*px[i+1] + 0.114*px[i+2]; gray[j] = g; sum += g; }
+        const dark = sum / gray.length < 128;
+        const hist = new Array(256).fill(0); gray.forEach(g => hist[dark ? 255 - g : g]++);
+        let lo = 0, hi = 255, acc = 0, cut = gray.length * 0.02;
+        for(acc = 0; lo < 255 && (acc += hist[lo]) < cut; lo++);
+        for(acc = 0; hi > 0 && (acc += hist[hi]) < cut; hi--);
+        const span = Math.max(1, hi - lo);
+        for(let i = 0, j = 0; i < px.length; i += 4, j++){
+          let g = dark ? 255 - gray[j] : gray[j];
+          g = Math.max(0, Math.min(255, (g - lo) * 255 / span));
+          px[i] = px[i+1] = px[i+2] = g;
+        }
+        ctx.putImageData(d, 0, 0);
+        URL.revokeObjectURL(img.src);
+        res(c);
+      };
+      img.onerror = () => rej(new Error('사진을 열 수 없어요'));
+      img.src = URL.createObjectURL(file);
+    });
+  }
+  async function readTossPhotos(files, setStatus){
+    await loadTesseract();
+    setStatus('글자 인식 준비 중… (처음 한 번은 오래 걸려요)');
+    const worker = await Tesseract.createWorker(['kor','eng'], 1);
+    const images = [];
+    try {
+      for(let i = 0; i < files.length; i++){
+        setStatus(`사진 읽는 중… ${i+1} / ${files.length}`);
+        const canvas = await prepImage(files[i]);
+        const { data } = await worker.recognize(canvas);
+        images.push({ lines: data.lines.map(l => ({ y: l.bbox.y0, c: l.confidence, t: l.text.trim() })) });
+      }
+    } finally { await worker.terminate(); }
+    return parseTossImages(images);
+  }
+
   function openPasteSheet(){
     const backdrop = document.createElement('div');
     backdrop.className = 'modal-backdrop';
     backdrop.innerHTML = `
       <div class="modal-sheet tall">
-        <h3>토스 내역 붙여넣기</h3>
-        <div class="imp-summary">캡처 → 사진 앱에서 글자 길게 눌러 전체 복사 → 아래에 붙여넣기</div>
-        <textarea class="paste-area" id="pText" placeholder="여기에 붙여넣기"></textarea>
+        <h3>토스 내역 가져오기</h3>
+        <div class="imp-summary">토스 소비 내역 캡처를 고르면 날짜·금액·카드를 읽어와요. 여러 장 한 번에 골라도 돼요 (겹친 부분은 한 번만 들어가요).</div>
+        <label class="btn btn-primary" style="display:block;text-align:center;">
+          📷 캡처 사진 고르기
+          <input type="file" id="pFiles" accept="image/*" multiple style="display:none;">
+        </label>
+        <div class="imp-summary" id="pStatus" style="margin-top:10px;"></div>
+        <details style="margin-top:6px;">
+          <summary style="font-size:12px;opacity:.7;">글자 복사해서 붙여넣기 (예전 방식)</summary>
+          <textarea class="paste-area" id="pText" placeholder="여기에 붙여넣기" style="margin-top:8px;"></textarea>
+          <button class="btn btn-secondary" id="pRead" style="margin-top:8px;">읽기</button>
+        </details>
         <div class="modal-actions">
           <button class="btn btn-secondary" id="pCancel">닫기</button>
-          <button class="btn btn-primary" id="pRead">읽기</button>
         </div>
         <div id="pResult"></div>
       </div>`;
@@ -1079,19 +1258,26 @@
     backdrop.addEventListener('click', e => { if(e.target === backdrop) backdrop.remove(); });
     $('pCancel').onclick = () => backdrop.remove();
 
-    try {
-      if(navigator.clipboard && navigator.clipboard.readText){
-        navigator.clipboard.readText().then(t => { if(t && !$('pText').value) $('pText').value = t; }).catch(()=>{});
+    $('pFiles').onchange = async (e) => {
+      const files = [...e.target.files];
+      if(!files.length) return;
+      const setStatus = t => { const el = $('pStatus'); if(el) el.textContent = t; };
+      try {
+        const items = await readTossPhotos(files, setStatus);
+        setStatus('');
+        renderPreview(items, 0, backdrop, true);
+      } catch(err){
+        setStatus(err.message || '사진을 읽지 못했어요');
       }
-    } catch(e){}
-
+      e.target.value = '';
+    };
     $('pRead').onclick = () => {
       const { items, pairCount } = parseToss($('pText').value);
-      renderPreview(items, pairCount, backdrop);
+      renderPreview(items, pairCount, backdrop, false);
     };
   }
 
-  function renderPreview(items, pairCount, backdrop){
+  function renderPreview(items, pairCount, backdrop, fromPhoto){
     const box = $('pResult');
     if(items.length === 0){
       box.innerHTML = `<div class="empty-note">가져올 카드 결제를 찾지 못했어요${pairCount ? ` (결제·취소 ${pairCount}쌍은 제외됨)` : ''}</div>`;
@@ -1100,7 +1286,7 @@
     items.forEach(it => {
       it.dup = it.kind === 'cancel' ? null : sameAsSaved(it);
       it.on = !it.dup && it.kind === 'normal';
-      it.answer = null;
+      it.answer = (it.kind === 'unknown' && it.dup) ? 'skip' : null;   // 이미 기록된 건은 묻지 않음
     });
 
     const opt = (arr, v) => arr.map(x => `<option${x===v?' selected':''}>${x}</option>`).join('');
@@ -1110,7 +1296,7 @@
       box.innerHTML = `
         <div class="imp-summary" style="margin-top:14px;">
           ${items.length}건 찾음${pairCount ? ` · 결제·취소 ${pairCount}쌍 제외` : ''}${askCount ? ` · <b style="color:var(--stamp-gold)">확인 필요 ${askCount}건</b>` : ''}<br>
-          날짜는 캡처 순서로 추정한 값이라 꼭 확인해주세요.
+          ${fromPhoto ? '취소(줄 그어진) 건은 이미 취소된 결제라 빼고, 노란 표시만 확인해주세요.' : '날짜는 캡처 순서로 추정한 값이라 꼭 확인해주세요.'}
         </div>
         ${items.map((it, k) => {
           const isAsk = it.kind === 'cancel' || it.kind === 'unknown';
@@ -1148,6 +1334,9 @@
               <select data-f="pay" data-k="${k}">${opt(PAYS, it.pay)}</select>
             </div>
             ${it.kind==='unknown' ? `<div class="imp-grid" style="grid-template-columns:1fr;"><input type="text" data-f="memo" data-k="${k}" placeholder="가맹점/메모" value="${esc(it.memo)}"></div>` : ''}
+            ${(it.amtCheck || it.kind==='unknown') ? `<div class="imp-grid" style="grid-template-columns:1fr;"><input type="number" inputmode="numeric" data-f="amt" data-k="${k}" value="${it.amt}"></div>` : ''}
+            ${it.amtCheck ? '<div class="imp-note">금액이 흐리게 읽혔어요. 숫자가 맞는지 확인해주세요.</div>' : ''}
+            ${it.dateGuess ? '<div class="imp-note">화면 위쪽이 잘려 날짜를 추정했어요. 확인해주세요.</div>' : ''}
             ${it.payUnknown ? '<div class="imp-note">카드를 알아보지 못해 현금으로 넣었어요. 확인해주세요.</div>' : ''}
             ` : ''}
             ${q}
@@ -1156,7 +1345,9 @@
         <button class="btn btn-primary" id="pSave" style="margin-top:6px;${askCount ? 'opacity:.4;' : ''}"${askCount ? ' disabled' : ''}>${askCount ? '확인 필요한 항목을 먼저 골라주세요' : '선택한 항목 저장'}</button>`;
 
       box.querySelectorAll('[data-chk]').forEach(c => c.onchange = () => { items[+c.dataset.chk].on = c.checked; draw(); });
-      box.querySelectorAll('[data-f]').forEach(el => el.onchange = el.oninput = () => { items[+el.dataset.k][el.dataset.f] = el.value; });
+      box.querySelectorAll('[data-f]').forEach(el => el.onchange = el.oninput = () => {
+        items[+el.dataset.k][el.dataset.f] = el.dataset.f === 'amt' ? (parseInt(el.value) || 0) : el.value;
+      });
       box.querySelectorAll('[data-a]').forEach(b => b.onclick = () => {
         const it = items[+b.dataset.k];
         it.answer = b.dataset.a;
@@ -1176,6 +1367,7 @@
             return;
           }
           if(!it.on) return;
+          if(!(Number(it.amt) > 0)) return;
           const mk = it.date.slice(0,7);
           const list = loadExpenses(mk);
           list.push({
