@@ -89,6 +89,7 @@
     font-size: 44px; font-weight: 700;
     margin: 6px 0 6px; word-break: keep-all;
   }
+  .month-hint { text-align: center; font-size: 10.5px; opacity: 0.45; margin-top: 14px; }
   .avg-line {
     font-size: 12px; opacity: 0.7; margin-bottom: 18px;
     font-family: 'IBM Plex Mono', monospace;
@@ -278,8 +279,7 @@
   <div class="topbar">
     <div class="title">가 계 부 <span id="monthLabel"></span></div>
     <div class="icons">
-      <button class="icon-btn" id="calendarBtn" title="지출 내역">☰</button>
-      <button class="icon-btn" id="settingsBtn" title="설정">⚙️</button>
+      <button class="chip hidden" id="thisMonthBtn">이번 달로</button>
     </div>
   </div>
   <div class="dots">
@@ -293,15 +293,17 @@
 
       <!-- ===== PAGE 0: MAIN ===== -->
       <div class="page" id="page-main">
-        <div class="today-label">오늘 쓸 수 있는 돈</div>
+        <div class="today-label" id="todayLabel">오늘 쓸 수 있는 돈</div>
         <div class="today-amount" id="todayAmount">0원</div>
         <div class="avg-line" id="avgLine"></div>
         <div class="card">
           <div class="mini-row"><span>고정비 지출</span><span class="v red" id="fixedTotalRow">0원</span></div>
           <div class="mini-row"><span>고정비 차감 후 잔액</span><span class="v" id="afterFixed">0원</span></div>
-          <div class="mini-row"><span>어제 지출</span><span class="v" id="yesterdaySpent">0원</span></div>
+          <div class="mini-row"><span id="spentLabel">어제 지출</span><span class="v" id="yesterdaySpent">0원</span></div>
           <div class="mini-row"><span>남은 일수</span><span class="v" id="daysLeft">0일</span></div>
-          <div class="mini-row"><span>현재 잔액</span><span class="v teal" id="currentBalance">0원</span></div>
+          <div class="mini-row"><span id="balanceLabel">현재 잔액</span><span class="v teal" id="currentBalance">0원</span></div>
+        </div>
+        <div class="month-hint">위아래로 밀면 다른 달을 볼 수 있어요
         </div>
       </div>
 
@@ -345,7 +347,7 @@
 
           <button class="btn btn-primary" id="saveSetupBtn">저장하기</button>
         </div>
-        <div style="text-align:center;font-size:10px;opacity:.5;margin-top:14px;font-family:'IBM Plex Mono',monospace;">v2.8</div>
+        <div style="text-align:center;font-size:10px;opacity:.5;margin-top:14px;font-family:'IBM Plex Mono',monospace;">v2.9</div>
       </div>
 
     </div>
@@ -532,42 +534,91 @@
   }
 
   /* ---------- render: main ---------- */
+  let mainMonth = monthKey();
+  function monthName(m){
+    const [y, mm] = m.split('-').map(Number);
+    return (y !== new Date().getFullYear() ? y + '년 ' : '') + mm + '월';
+  }
+  function configFor(m){
+    if(m === monthKey()) return loadConfig();
+    const raw = localStorage.getItem('gb_config_' + m);
+    return raw ? normalizeConfig(JSON.parse(raw)) : loadConfig();   // 기록 없는 달은 지금 설정을 계획으로 사용
+  }
   function renderMain(){
-    const cfg = loadConfig();
-    const expenses = loadExpenses();
+    const cur = monthKey();
+    const isCurrent = mainMonth === cur, isPast = mainMonth < cur;
+    const cfg = configFor(mainMonth);
+    const expenses = loadExpenses(mainMonth);
     const fixedTotal = cfg.fixedItems.reduce((s,i)=>s+i.amt,0);
     const spentTotal = expenses.reduce((s,e)=>s+e.amt,0);
     const balance = cfg.budget - fixedTotal - spentTotal;
     const afterFixed = cfg.budget - fixedTotal;
+    const [my, mm] = mainMonth.split('-').map(Number);
+    const monthDays = new Date(my, mm, 0).getDate();
 
-    const yestKey = localDateStr(new Date(Date.now() - 86400000));
-    const yestSpent = expenses.filter(e=>e.date===yestKey).reduce((s,e)=>s+e.amt,0);
-
-    const daysLeft = daysRemainingIncludingToday();
+    // 같은 계산식: 남은 잔액 ÷ 남은 일수 (지난달은 마지막 날 기준 1일, 다음달은 한 달 전체)
+    const daysLeft = isCurrent ? daysRemainingIncludingToday() : (isPast ? 1 : monthDays);
     const dailyAllowance = balance / Math.max(daysLeft,1);
 
-    $('monthLabel').textContent = '· ' + (new Date().getMonth()+1) + '월';
+    $('monthLabel').textContent = '· ' + monthName(mainMonth);
+    $('thisMonthBtn').classList.toggle('hidden', isCurrent);
+    $('todayLabel').textContent = isCurrent ? '오늘 쓸 수 있는 돈'
+      : isPast ? monthName(mainMonth) + ' 마지막 날 쓸 수 있던 돈' : monthName(mainMonth) + ' 하루 예산';
     $('todayAmount').textContent = fmt(dailyAllowance);
-    $('yesterdaySpent').textContent = '-' + fmt(yestSpent);
-    $('daysLeft').textContent = daysLeft + '일';
+    if(isCurrent){
+      const yestKey = localDateStr(new Date(Date.now() - 86400000));
+      const yestSpent = expenses.filter(e=>e.date===yestKey).reduce((s,e)=>s+e.amt,0);
+      $('spentLabel').textContent = '어제 지출';
+      $('yesterdaySpent').textContent = '-' + fmt(yestSpent);
+      $('daysLeft').textContent = daysLeft + '일';
+      $('balanceLabel').textContent = '현재 잔액';
+    } else {
+      $('spentLabel').textContent = '그 달 지출 합계';
+      $('yesterdaySpent').textContent = '-' + fmt(spentTotal);
+      $('daysLeft').textContent = isPast ? '끝난 달' : monthDays + '일';
+      $('balanceLabel').textContent = isPast ? '남은 돈' : '남을 돈 (계획)';
+    }
     $('afterFixed').textContent = fmt(afterFixed);
     $('currentBalance').textContent = fmt(balance);
     $('fixedTotalRow').textContent = '-' + fmt(fixedTotal);
 
-    const prevM = shiftMonth(monthKey(), -1);
-    const prevRaw = localStorage.getItem('gb_expenses_' + prevM);
-    if(prevRaw && JSON.parse(prevRaw).length > 0){
-      const prevSpent = JSON.parse(prevRaw).reduce((s,e)=>s+e.amt,0);
-      const [py, pm] = prevM.split('-').map(Number);
-      const prevDays = new Date(py, pm, 0).getDate();
-      $('avgLine').textContent = '지난달 하루 평균 ' + fmt(prevSpent / prevDays);
+    if(isCurrent){
+      const prevM = shiftMonth(cur, -1);
+      const prevRaw = localStorage.getItem('gb_expenses_' + prevM);
+      if(prevRaw && JSON.parse(prevRaw).length > 0){
+        const prevSpent = JSON.parse(prevRaw).reduce((s,e)=>s+e.amt,0);
+        const [py, pm] = prevM.split('-').map(Number);
+        const prevDays = new Date(py, pm, 0).getDate();
+        $('avgLine').textContent = '지난달 하루 평균 ' + fmt(prevSpent / prevDays);
+      } else {
+        const elapsedDays = new Date().getDate();
+        $('avgLine').textContent = '이번 달 하루 평균 ' + fmt(spentTotal / elapsedDays);
+      }
     } else {
-      const elapsedDays = new Date().getDate();
-      $('avgLine').textContent = '이번 달 하루 평균 ' + fmt(spentTotal / elapsedDays);
+      $('avgLine').textContent = isPast ? '그 달 하루 평균 ' + fmt(spentTotal / monthDays) : '아직 지출 기록 없음';
     }
 
     applyTheme(balance);
   }
+  function changeMainMonth(delta){
+    mainMonth = shiftMonth(mainMonth, delta);
+    renderMain();
+    const el = $('page-main');
+    el.style.transition = 'none';
+    el.style.transform = `translateY(${delta < 0 ? -36 : 36}px)`;
+    el.style.opacity = '0';
+    void el.offsetHeight;
+    el.style.transition = 'transform .25s ease, opacity .25s ease';
+    el.style.transform = '';
+    el.style.opacity = '';
+  }
+  $('thisMonthBtn').onclick = () => {
+    if(mainMonth === monthKey()) return;
+    const delta = mainMonth < monthKey() ? 1 : -1;
+    mainMonth = shiftMonth(monthKey(), -delta);
+    changeMainMonth(delta);
+    if(pageIndex === 1){ viewMonth = mainMonth; renderLedger(); }
+  };
 
   /* ---------- render: ledger ---------- */
   let viewMonth = monthKey();
@@ -797,8 +848,6 @@
     $('swiper').style.transform = `translateX(-${i * 100}%)`;
     document.querySelectorAll('.dot').forEach((d,idx)=> d.classList.toggle('active', idx===i));
     $('bottomBar').style.display = i === 2 ? 'none' : 'flex';
-    $('calendarBtn').classList.toggle('active', i===1);
-    $('settingsBtn').classList.toggle('active', i===2);
   }
   function goToPage(i){
     const next = Math.max(0, Math.min(2, i));
@@ -806,16 +855,14 @@
     pageIndex = next;
     snapToPage(pageIndex);
     if(changed){
-      if(pageIndex===1){ viewMonth = monthKey(); renderLedger(); }
+      if(pageIndex===1){ viewMonth = mainMonth; renderLedger(); }
       if(pageIndex===2) setSettingsMode(false);
     }
   }
-  $('calendarBtn').onclick = () => goToPage(1);
-  $('settingsBtn').onclick = () => goToPage(2);
   document.querySelectorAll('.dot').forEach(d => d.onclick = () => goToPage(parseInt(d.getAttribute('data-p'))));
 
   const viewport = document.querySelector('.viewport');
-  let touchStartX = null, touchStartY = null, touchDeltaX = 0, lockedDir = null;
+  let touchStartX = null, touchStartY = null, touchDeltaX = 0, touchDeltaY = 0, lockedDir = null;
   viewport.addEventListener('touchstart', e => {
     if(e.target.closest('input, select, button, .chip, .del, .icon-btn')){
       touchStartX = null;
@@ -835,7 +882,7 @@
       lockedDir = Math.abs(dx) > Math.abs(dy) ? 'h' : 'v';
       if(lockedDir === 'h') $('swiper').style.transition = 'none';
     }
-    if(lockedDir !== 'h') return; // 세로 스크롤 중에는 가로 이동 안 함
+    if(lockedDir !== 'h'){ touchDeltaY = dy; return; } // 세로: 첫 페이지면 달 이동 (손을 뗄 때 판단)
     touchDeltaX = dx;
     const base = -pageIndex * viewport.offsetWidth;
     $('swiper').style.transform = `translateX(${base + touchDeltaX}px)`;
@@ -849,8 +896,13 @@
       } else {
         snapToPage(pageIndex);
       }
+    } else if(lockedDir === 'v' && pageIndex === 0 && Math.abs(touchDeltaY) > 70){
+      const el = $('page-main');
+      const atTop = el.scrollTop <= 0, atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 2;
+      if(touchDeltaY > 0 && atTop) changeMainMonth(-1);        // 아래로 밀면 지난달
+      else if(touchDeltaY < 0 && atBottom) changeMainMonth(1); // 위로 밀면 다음달
     }
-    touchStartX = null; touchStartY = null; touchDeltaX = 0; lockedDir = null;
+    touchStartX = null; touchStartY = null; touchDeltaX = 0; touchDeltaY = 0; lockedDir = null;
   });
 
   /* ---------- add / edit expense modal ---------- */
@@ -1388,7 +1440,7 @@
               <select data-f="cat" data-k="${k}">${opt(loadConfig().cats.includes(it.cat) ? loadConfig().cats : [...loadConfig().cats, it.cat], it.cat)}</select>
               <select data-f="pay" data-k="${k}">${opt(PAYS, it.pay)}</select>
             </div>
-            ${it.kind==='unknown' ? `<div class="imp-grid" style="grid-template-columns:1fr;"><input type="text" data-f="memo" data-k="${k}" placeholder="가맹점/메모" value="${esc(it.memo)}"></div>` : ''}
+            <div class="imp-grid" style="grid-template-columns:1fr;"><input type="text" data-f="memo" data-k="${k}" placeholder="이름 (가맹점/메모)" value="${esc(it.memo)}"></div>
             ${(it.amtCheck || it.kind==='unknown') ? `<div class="imp-grid" style="grid-template-columns:1fr;"><input type="number" inputmode="numeric" data-f="amt" data-k="${k}" value="${it.amtMissing ? '' : it.amt}" placeholder="금액"></div>` : ''}
             ${it.amtMissing ? '<div class="imp-note">금액을 읽지 못했어요. 사진 보고 금액을 적어주세요.</div>'
               : it.amtCheck ? '<div class="imp-note">금액이 흐리게 읽혔어요. 숫자가 맞는지 확인해주세요.</div>' : ''}
