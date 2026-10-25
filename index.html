@@ -345,7 +345,7 @@
 
           <button class="btn btn-primary" id="saveSetupBtn">저장하기</button>
         </div>
-        <div style="text-align:center;font-size:10px;opacity:.5;margin-top:14px;font-family:'IBM Plex Mono',monospace;">v2.6</div>
+        <div style="text-align:center;font-size:10px;opacity:.5;margin-top:14px;font-family:'IBM Plex Mono',monospace;">v2.7</div>
       </div>
 
     </div>
@@ -969,10 +969,10 @@
     return null;
   }
   function guessCatRaw(m){
-    if(/코스트코|컬리|kurly|마트|편의점|GS25|CU|세븐|이마트|홈플러스|푸르네|카페|커피|스타벅스|바나프레소|메가|컴포즈|빽다방|투썸|이디야|배달|식당/i.test(m)) return '식비';
-    if(/다이소|올리브영|쿠팡|생활/i.test(m)) return '생활';
-    if(/버스|지하철|택시|교통|코레일/i.test(m)) return '교통';
-    if(/미용|헤어|무지|muji/i.test(m)) return '미용';
+    if(/무지|muji|무인양품|유니클로|uniqlo|자라|zara|h&m|에잇세컨즈|탑텐|스파오|미용|헤어|네일/i.test(m)) return '미용';
+    if(/버스|지하철|택시|교통|코레일|ktx|srt|고속|티머니|주유|주차/i.test(m)) return '교통';
+    if(/다이소|올리브영|쿠팡|이케아|약국|생활/i.test(m)) return '생활';
+    if(/코스트코|컬리|kurly|마트|편의점|GS25|(^|[^a-z])CU([^a-z]|$)|세븐|이마트|홈플러스|푸르네|카페|커피|스타벅스|바나프레소|메가|컴포즈|빽다방|투썸|이디야|배달|식당|빵|베이커리|파리바게|뚜레쥬르|휴게소|맥도날드|버거|롯데리아|치킨|피자|김밥|분식|떡/i.test(m)) return '식비';
     return '기타';
   }
   function guessCat(m){
@@ -1005,7 +1005,7 @@
       const next = (lines[i+1] || '').replace(/｜/g,'|').replace(/\s[lI]\s/g,' | ');
 
       // 계좌에서 나간 것 (화살표)
-      if(/->|→/.test(next)){
+      if(/->|→|계좌\s*이체/.test(next)){
         i++;
         if(/서울페이/.test(next)){
           items.push({ date: curDate, amt, memo: '서울페이 충전', cat: guessCat('서울페이'), pay: '현금', kind: 'normal' });
@@ -1060,10 +1060,10 @@
   }
   function ocrAmount(t){
     // 앞쪽 아이콘 잡음은 무시하고 "-금액원" 부분만 찾음 (원이 &, 윈, 워, ¢, %로 읽히는 경우 포함)
-    const m = t.match(/-\s?(\d{1,3}(?:[,.]\d{3})+|\d{3,7})\s?(원|윈|워|&|¢|%|%!)?\s*$/);
+    const m = t.match(/-\s?(\d{1,3}(?:[,.]\d{3})+|\d{3,7})\s?([^\d\s,.]{1,3})?\s*$/);
     if(!m) return null;
     if(!m[2] && !/[,.]/.test(m[1])) return null;   // 쉼표도 "원"도 없으면 금액으로 보기 어려움
-    return parseInt(m[1].replace(/[,.]/g,''));
+    return { amt: parseInt(m[1].replace(/[,.]/g,'')), suffix: !!m[2] };
   }
   function ocrDate(monthHint, day){
     const now = new Date();
@@ -1072,6 +1072,23 @@
     if(m > now.getMonth() + 1) y -= 1;               // 지금보다 뒤의 달이면 작년
     if(m < 1){ m = 12; y -= 1; }
     return `${y}-${String(m).padStart(2,'0')}-${String(day).padStart(2,'0')}`;
+  }
+  // "19일 월요일", "192 월요일"(일→2 오인식) 같은 날짜 머리글 → 요일까지 맞는 날짜로
+  function ocrHeaderDate(t, monthHint){
+    const m = t.match(/^\D{0,3}(\d{1,3})\s*([일길잎2]?)\s*([월화수목금토일])\s?요일/);
+    if(!m) return null;
+    const WD = '일월화수목금토';
+    const digits = m[1];
+    const cands = [];
+    if(m[2] && m[2] !== '2' || digits.length <= 2) cands.push(parseInt(digits));
+    if(digits.length >= 2) cands.push(parseInt(digits.slice(0,2)));
+    cands.push(parseInt(digits.slice(0,1)));
+    const valid = [...new Set(cands)].filter(d => d >= 1 && d <= 31);
+    for(const d of valid){
+      const ds = ocrDate(monthHint, d);
+      if(new Date(ds + 'T00:00:00').getDay() === WD.indexOf(m[3])) return ds;
+    }
+    return valid.length ? ocrDate(monthHint, valid[0]) : null;
   }
   function addDays(dateStr, n){
     const d = new Date(dateStr + 'T00:00:00'); d.setDate(d.getDate() + n);
@@ -1090,27 +1107,42 @@
       const items = [];
       let curDate = null;
       let pendingAmt = null;     // { amt, conf } 아직 가맹점 줄을 못 만난 금액
+      let listStarted = false;   // 날짜 머리글이나 내역 줄을 한 번이라도 만났는지
       const flushUnknown = () => {
         if(pendingAmt) items.push({ amt: pendingAmt.amt, amtCheck: pendingAmt.conf < 70, img: imgIdx,
           date: curDate, dateGuess: !curDate, memo: '', pay: '현금', kind: 'unknown' });
         pendingAmt = null;
       };
       for(const l of lines){
-        const dm = l.t.match(/(\d{1,2})일\s*[월화수목금토일]요일/);
-        if(dm){ flushUnknown(); curDate = ocrDate(monthHint, parseInt(dm[1])); continue; }
+        const hd = ocrHeaderDate(l.t, monthHint);
+        if(hd){ flushUnknown(); listStarted = true; curDate = hd; continue; }
 
         // 상단 달력의 일별 합계 줄 (금액이 여러 개) 무시
         if((l.t.match(/-\s?\d[\d,.]{2,}/g) || []).length >= 2) continue;
-        const amt = ocrAmount(l.t);
-        if(amt !== null){ flushUnknown(); pendingAmt = { amt, conf: l.c }; continue; }
+        const am = ocrAmount(l.t);
+        if(am !== null){
+          if(!listStarted && !am.suffix) continue;    // 목록 위 달력의 일별 합계 (예: "-75,700")
+          flushUnknown(); pendingAmt = { amt: am.amt, conf: l.c }; continue;
+        }
 
-        const isTransfer = /계좌|>|→/.test(l.t) && !l.t.includes('|');
-        const isMerchant = l.t.includes('|');
+        const isTransfer = /계좌|이체|→|->|>/.test(l.t);   // 계좌이체·충전 (| 가 있어도)
+        const isMerchant = !isTransfer && l.t.includes('|');
         if(!isTransfer && !isMerchant){ continue; }   // 잡음·버튼·배너
+        listStarted = true;
 
         // 취소 줄: 토스에서 줄 그어진 건 = 이미 취소된 결제 → 건너뜀
         if(/취소\s*\|/.test(l.t)){ pendingAmt = null; continue; }
-        if(!pendingAmt) continue;                       // 위가 잘려 금액이 없는 줄
+        if(!pendingAmt){
+          // 금액 줄을 못 읽은 가맹점: 날짜 아래에 있으면 금액만 직접 입력받음 (맨 위 잘린 줄은 무시)
+          if(isMerchant && curDate && !/취소/.test(l.t)){
+            const parts0 = l.t.split('|').map(x => x.trim());
+            const memo0 = parts0[0].replace(/^.*?(?=\(주\)|[가-힣A-Za-z])/, '').trim();
+            const pay0 = ocrCard(parts0.slice(1).join(' '));
+            items.push({ amt: 0, amtCheck: true, amtMissing: true, img: imgIdx, date: curDate, dateGuess: false,
+                         memo: memo0, pay: pay0 || '현금', payUnknown: !pay0, kind: 'normal' });
+          }
+          continue;
+        }
 
         const base = { amt: pendingAmt.amt, amtCheck: pendingAmt.conf < 70, img: imgIdx,
                        date: curDate, dateGuess: !curDate };
@@ -1122,7 +1154,7 @@
         }
         if(/대출이자|인출/.test(l.t)) continue;
         const parts = l.t.split('|').map(s => s.trim());
-        const memo = parts[0].replace(/^[^가-힣A-Za-z0-9]+/, '').trim();
+        const memo = parts[0].replace(/^.*?(?=\(주\)|[가-힣A-Za-z])/, '').trim();
         const pay = ocrCard(parts.slice(1).join(' '));
         items.push({ ...base, memo, pay: pay || '현금', payUnknown: !pay, kind: 'normal' });
       }
@@ -1143,7 +1175,9 @@
     // 여러 장에 겹쳐 찍힌 건은 하나만 (같은 날짜·금액, 다른 사진)
     const result = [];
     all.forEach(it => {
-      const twin = result.find(r => r.img !== it.img && r.date === it.date && r.amt === it.amt && !r._twin);
+      const twin = result.find(r => r.img !== it.img && r.date === it.date && !r._twin &&
+        (r.amt === it.amt || ((r.amtMissing || it.amtMissing) && r.memo && r.memo === it.memo)));
+      if(twin && twin.amtMissing && !it.amtMissing){ twin.amt = it.amt; twin.amtMissing = false; twin.amtCheck = it.amtCheck; }
       if(twin){
         twin._twin = true;
         if(twin.kind === 'unknown' && it.kind === 'normal'){ Object.assign(twin, { kind: 'normal', memo: it.memo, pay: it.pay, payUnknown: it.payUnknown }); }
@@ -1274,7 +1308,7 @@
     }
     items.forEach(it => {
       it.dup = it.kind === 'cancel' ? null : sameAsSaved(it);
-      it.on = !it.dup && it.kind === 'normal';
+      it.on = !it.dup && it.kind === 'normal' && !(it.amtMissing && !it.amt);
       it.answer = (it.kind === 'unknown' && it.dup) ? 'skip' : null;   // 이미 기록된 건은 묻지 않음
     });
 
@@ -1323,8 +1357,9 @@
               <select data-f="pay" data-k="${k}">${opt(PAYS, it.pay)}</select>
             </div>
             ${it.kind==='unknown' ? `<div class="imp-grid" style="grid-template-columns:1fr;"><input type="text" data-f="memo" data-k="${k}" placeholder="가맹점/메모" value="${esc(it.memo)}"></div>` : ''}
-            ${(it.amtCheck || it.kind==='unknown') ? `<div class="imp-grid" style="grid-template-columns:1fr;"><input type="number" inputmode="numeric" data-f="amt" data-k="${k}" value="${it.amt}"></div>` : ''}
-            ${it.amtCheck ? '<div class="imp-note">금액이 흐리게 읽혔어요. 숫자가 맞는지 확인해주세요.</div>' : ''}
+            ${(it.amtCheck || it.kind==='unknown') ? `<div class="imp-grid" style="grid-template-columns:1fr;"><input type="number" inputmode="numeric" data-f="amt" data-k="${k}" value="${it.amtMissing ? '' : it.amt}" placeholder="금액"></div>` : ''}
+            ${it.amtMissing ? '<div class="imp-note">금액을 읽지 못했어요. 사진 보고 금액을 적어주세요.</div>'
+              : it.amtCheck ? '<div class="imp-note">금액이 흐리게 읽혔어요. 숫자가 맞는지 확인해주세요.</div>' : ''}
             ${it.dateGuess ? '<div class="imp-note">화면 위쪽이 잘려 날짜를 추정했어요. 확인해주세요.</div>' : ''}
             ${it.payUnknown ? '<div class="imp-note">카드를 알아보지 못해 현금으로 넣었어요. 확인해주세요.</div>' : ''}
             ` : ''}
@@ -1335,7 +1370,12 @@
 
       box.querySelectorAll('[data-chk]').forEach(c => c.onchange = () => { items[+c.dataset.chk].on = c.checked; draw(); });
       box.querySelectorAll('[data-f]').forEach(el => el.onchange = el.oninput = () => {
-        items[+el.dataset.k][el.dataset.f] = el.dataset.f === 'amt' ? (parseInt(el.value) || 0) : el.value;
+        const it = items[+el.dataset.k];
+        it[el.dataset.f] = el.dataset.f === 'amt' ? (parseInt(el.value) || 0) : el.value;
+        if(el.dataset.f === 'amt' && it.amtMissing && it.amt > 0){
+          it.amtMissing = false;
+          if(!it.on){ it.on = true; const cb = box.querySelector(`[data-chk="${el.dataset.k}"]`); if(cb) cb.checked = true; }
+        }
       });
       box.querySelectorAll('[data-a]').forEach(b => b.onclick = () => {
         const it = items[+b.dataset.k];
